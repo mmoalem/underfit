@@ -34,6 +34,9 @@ dependencies = [
   "numpy>=2.2.6",
   "soundfile>=0.12",
   "Pillow>=10",
+  # Used for streaming checkpoint loads — keeps CPU peak RAM low when
+  # training large models on memory-constrained hosts (Colab T4, etc.).
+  "accelerate>=0.30",
 ]
 
 [[tool.uv.index]]

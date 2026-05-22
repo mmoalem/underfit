@@ -156,6 +156,64 @@ class _LossByTimestepLog:
             self._f = None
 
 
+def _stream_checkpoint_into_model(model, ckpt_path, *, device, dtype=None,
+                                  remap_keys=True):
+    """Load a checkpoint tensor-by-tensor from an mmap'd safetensors file,
+    moving each tensor directly to `device` and dropping the CPU side
+    immediately. Avoids holding the full state_dict in CPU RAM — the
+    difference between fitting on Colab T4 (13 GB RAM) and OOM-killing.
+
+    `remap_keys=True` applies the drop-one-part heuristic that SA3's
+    `remap_state_dict_keys` uses: when a source key doesn't match any in
+    the model, try dropping each path component to see if a shorter key
+    matches (e.g. `pretransform.model.encoder.foo` → `pretransform.encoder.foo`).
+
+    Returns a (matched, skipped) tuple. Falls back to bulk-load for non-
+    safetensors checkpoints (rare; .ckpt/.pt format).
+    """
+    from safetensors import safe_open
+    from accelerate.utils import set_module_tensor_to_device
+
+    if Path(ckpt_path).suffix.lower() != ".safetensors":
+        print(f"  ({Path(ckpt_path).suffix} format — falling back to bulk load)",
+              flush=True)
+        return None
+
+    model_state_keys = set(model.state_dict().keys())
+    matched = skipped = 0
+
+    with safe_open(ckpt_path, framework="pt", device="cpu") as f:
+        for src_key in f.keys():
+            tgt_key = src_key
+            if remap_keys and tgt_key not in model_state_keys:
+                parts = src_key.split(".")
+                tgt_key = None
+                for i in range(1, len(parts)):
+                    candidate = ".".join(parts[:i]) + "." + ".".join(parts[i + 1:])
+                    if candidate in model_state_keys:
+                        tgt_key = candidate
+                        break
+                if tgt_key is None:
+                    skipped += 1
+                    continue
+            elif tgt_key not in model_state_keys:
+                skipped += 1
+                continue
+
+            tensor = f.get_tensor(src_key)
+            cast = dtype if (dtype is not None and tensor.is_floating_point()) else None
+            try:
+                set_module_tensor_to_device(model, tgt_key, device,
+                                            value=tensor, dtype=cast)
+                matched += 1
+            except Exception as e:
+                print(f"  warn: couldn't set {tgt_key!r}: {e}", flush=True)
+                skipped += 1
+            del tensor
+
+    return (matched, skipped)
+
+
 def _explain_model_load_error(exc, model_config):
     """Print friendly help for known model-load failure modes before the
     traceback bubbles up. Catches gated/missing HuggingFace repos (typically
@@ -266,14 +324,27 @@ def run_training(args, backend):
         _explain_model_load_error(e, model_config)
         raise
     if args.pretrained_ckpt_path:
-        print(f"[startup] Loading base weights from {args.pretrained_ckpt_path} …", flush=True)
-        # Route through backend.load_state_into so SA3's remap_state_dict_keys
-        # gets applied (pretransform.model.* -> pretransform.* nesting fix).
-        backend.load_state_into(
-            model,
-            load_ckpt_state_dict(args.pretrained_ckpt_path),
-            model_type=model_config.get("model_type"),
+        print(f"[startup] Streaming base weights from {args.pretrained_ckpt_path} …", flush=True)
+        # First try the low-RAM streaming load (reads each tensor from
+        # mmap'd safetensors, copies straight to GPU, releases CPU side).
+        # Cuts peak CPU RAM from ~14 GB to ~6 GB for SA3-medium — the
+        # difference between OOM and not on a 13 GB Colab T4.
+        device_for_load = "cuda" if torch.cuda.is_available() else "cpu"
+        result = _stream_checkpoint_into_model(
+            model, args.pretrained_ckpt_path,
+            device=device_for_load,
+            dtype=torch.float16,
         )
+        if result is None:
+            # .ckpt / .pt format — no safetensors mmap available, bulk-load it.
+            backend.load_state_into(
+                model,
+                load_ckpt_state_dict(args.pretrained_ckpt_path),
+                model_type=model_config.get("model_type"),
+            )
+        else:
+            matched, skipped = result
+            print(f"[startup]   matched {matched} keys, skipped {skipped}", flush=True)
     if args.remove_pretransform_weight_norm == "pre_load":
         remove_weight_norm_from_model(model.pretransform)
     if args.pretransform_ckpt_path:

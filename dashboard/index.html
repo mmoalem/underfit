@@ -1273,15 +1273,14 @@
           </select>
         </div>
       </div>
-      <!-- LoRA source tabs: New (configure from scratch) vs Load .safetensors (seed from upload) -->
-      <div style="display:flex;gap:6px;align-items:center;margin:8px 0 4px 0">
-        <button type="button" class="modal-launch" id="new-ft-lora-tab-new"
-                onclick="setLoraSourceTab('new')"
-                style="padding:4px 14px;font-size:0.85em">New LoRA</button>
-        <button type="button" class="modal-cancel" id="new-ft-lora-tab-load"
-                onclick="setLoraSourceTab('load')"
-                style="padding:4px 14px;font-size:0.85em">Load .safetensors</button>
-        <span id="new-ft-seed-status" style="color:var(--text2);font-size:0.78em;margin-left:8px"></span>
+      <!-- Optional seed: start from an existing .safetensors LoRA. Button is
+           shown by default; on successful upload it's swapped for the seed
+           filename + a [clear] link that brings the button back. -->
+      <div style="display:flex;gap:8px;align-items:center;margin:8px 0 4px 0;min-height:30px">
+        <button type="button" class="modal-cancel" id="new-ft-lora-load-btn"
+                onclick="document.getElementById('new-ft-seed-file').click()"
+                style="padding:4px 14px;font-size:0.85em">📂 Start from a previous LoRA</button>
+        <span id="new-ft-seed-status" style="color:var(--text2);font-size:0.78em"></span>
         <input type="file" id="new-ft-seed-file" accept=".safetensors" style="display:none"
                onchange="handleSeedLoraFile(event)">
         <input type="hidden" id="new-ft-seed-path">
@@ -1443,6 +1442,19 @@
         <button class="modal-cancel" onclick="newFtBackToStep3()">← Back</button>
         <button class="modal-launch" id="new-ft-launch-btn" onclick="confirmNewFinetune()">Launch</button>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- Seed-LoRA upload progress popup (sits ABOVE the New Finetune modal while
+     a checkpoint streams up; closes itself on completion / error). -->
+<div class="modal-overlay" id="seed-upload-modal" style="display:none;z-index:1000">
+  <div class="modal" style="max-width:420px;text-align:center;padding:20px 24px">
+    <div style="font-size:1.05em;font-weight:600;margin-bottom:6px">Uploading LoRA checkpoint</div>
+    <div id="seed-upload-filename" style="color:var(--text2);font-size:0.85em;word-break:break-all;margin-bottom:14px">filename.safetensors</div>
+    <div id="seed-upload-status" style="font-size:0.88em;color:var(--text1)">starting…</div>
+    <div style="width:100%;height:6px;background:rgba(255,255,255,0.08);border-radius:3px;margin-top:14px;overflow:hidden">
+      <div id="seed-upload-bar" style="height:100%;width:0%;background:var(--accent2);transition:width 0.2s ease-out"></div>
     </div>
   </div>
 </div>
@@ -5245,8 +5257,6 @@ function estimateLoraParams(model, adapterType, rank) {
 // from scratch. "Load .safetensors" = upload a pre-trained adapter, validate
 // server-side, populate the fields with its baked-in config, then freeze them
 // so the user can't change values that wouldn't match the seed file.
-let _newFtLoraSource = 'new'; // 'new' | 'load'
-
 function _loraFreezableIds() {
   return ['new-ft-lora-type', 'new-ft-rank', 'new-ft-alpha',
           'new-ft-include', 'new-ft-exclude'];
@@ -5263,31 +5273,28 @@ function _setLoraFrozen(frozen) {
   if (lf) lf.style.opacity = frozen ? '0.6' : '';
 }
 
-window.setLoraSourceTab = function(which) {
-  _newFtLoraSource = which;
-  const newBtn = document.getElementById('new-ft-lora-tab-new');
-  const loadBtn = document.getElementById('new-ft-lora-tab-load');
-  newBtn.className = which === 'new' ? 'modal-launch' : 'modal-cancel';
-  loadBtn.className = which === 'load' ? 'modal-launch' : 'modal-cancel';
-  if (which === 'load') {
-    // If no seed loaded yet, prompt to pick a file.
-    const status = document.getElementById('new-ft-seed-status');
-    if (!document.getElementById('new-ft-seed-path').value) {
-      document.getElementById('new-ft-seed-file').click();
-      status.textContent = 'choose a .safetensors file…';
-    }
-  } else {
-    // Switching back to New clears the seed and unfreezes.
-    _clearSeedLora();
-  }
-};
+function _showSeedUploadModal(filename, sizeMb) {
+  document.getElementById('seed-upload-filename').textContent = filename;
+  document.getElementById('seed-upload-status').textContent = `starting upload — ${sizeMb} MB`;
+  document.getElementById('seed-upload-bar').style.width = '0%';
+  document.getElementById('seed-upload-modal').style.display = 'flex';
+}
+function _updateSeedUploadModal(pct, statusText) {
+  document.getElementById('seed-upload-status').textContent = statusText;
+  if (pct != null) document.getElementById('seed-upload-bar').style.width = pct + '%';
+}
+function _hideSeedUploadModal() {
+  document.getElementById('seed-upload-modal').style.display = 'none';
+}
 
 function _clearSeedLora() {
   document.getElementById('new-ft-seed-path').value = '';
   document.getElementById('new-ft-seed-filename').value = '';
   document.getElementById('new-ft-seed-step').value = '';
-  document.getElementById('new-ft-seed-status').textContent = '';
+  document.getElementById('new-ft-seed-status').innerHTML = '';
   document.getElementById('new-ft-seed-file').value = '';
+  const btn = document.getElementById('new-ft-lora-load-btn');
+  if (btn) btn.style.display = '';
   _setLoraFrozen(false);
 }
 
@@ -5298,11 +5305,11 @@ window.handleSeedLoraFile = async function(ev) {
     alert('Only .safetensors files are accepted.\n.ckpt / .pt files use pickle and are a security risk.');
     return;
   }
-  const status = document.getElementById('new-ft-seed-status');
   const sizeMb = (file.size / 1e6).toFixed(1);
   const baseModel = document.getElementById('new-ft-base-model').value || 'sa3-medium';
   const url = `/api/lora/validate_seed?filename=${encodeURIComponent(file.name)}&base_model=${encodeURIComponent(baseModel)}`;
-  // Use XMLHttpRequest so we can show upload progress (fetch can't, for upload bodies)
+
+  _showSeedUploadModal(file.name, sizeMb);
   let data;
   try {
     data = await new Promise((resolve, reject) => {
@@ -5312,9 +5319,9 @@ window.handleSeedLoraFile = async function(ev) {
       xhr.upload.onprogress = (e) => {
         if (e.lengthComputable) {
           const pct = (100 * e.loaded / e.total).toFixed(0);
-          status.textContent = `uploading ${file.name} — ${pct}% of ${sizeMb} MB`;
+          _updateSeedUploadModal(pct, `${pct}% of ${sizeMb} MB`);
         } else {
-          status.textContent = `uploading ${file.name} (${sizeMb} MB)…`;
+          _updateSeedUploadModal(null, `uploading ${sizeMb} MB…`);
         }
       };
       xhr.onload = () => {
@@ -5327,18 +5334,17 @@ window.handleSeedLoraFile = async function(ev) {
       };
       xhr.onerror = () => reject(new Error('network error'));
       xhr.upload.onerror = () => reject(new Error('upload error'));
-      status.textContent = `uploading ${file.name} (${sizeMb} MB)…`;
       xhr.send(file);
     });
-    status.textContent = 'validating…';
+    _updateSeedUploadModal(100, 'validating…');
   } catch (e) {
-    status.textContent = '';
+    _hideSeedUploadModal();
     alert('Upload failed: ' + e.message);
     return;
   }
+  _hideSeedUploadModal();
+
   if (!data.ok) {
-    status.textContent = '';
-    // Build a detail dump for the user
     const lines = ['Unable to validate .safetensors checkpoint.'];
     if (data.error) lines.push('', 'Error: ' + data.error);
     if (data.partial && Object.keys(data.partial).length) {
@@ -5348,11 +5354,9 @@ window.handleSeedLoraFile = async function(ev) {
       }
     }
     alert(lines.join('\n'));
-    // Stay in 'new' mode
-    setLoraSourceTab('new');
     return;
   }
-  // Success — populate fields and freeze.
+  // Success — populate fields, freeze, hide the load button, show filename + [clear].
   document.getElementById('new-ft-seed-path').value = data.path;
   document.getElementById('new-ft-seed-filename').value = data.filename;
   document.getElementById('new-ft-seed-step').value = (data.config && data.config.step) || 0;
@@ -5363,11 +5367,13 @@ window.handleSeedLoraFile = async function(ev) {
   if (Array.isArray(cfg.include)) document.getElementById('new-ft-include').value = cfg.include.join(',');
   if (Array.isArray(cfg.exclude)) document.getElementById('new-ft-exclude').value = cfg.exclude.join(',');
   _setLoraFrozen(true);
+  document.getElementById('new-ft-lora-load-btn').style.display = 'none';
   const stepHint = cfg.step ? ` · step ${cfg.step}` : '';
+  const status = document.getElementById('new-ft-seed-status');
   status.innerHTML = `<span style="color:var(--green)">✓ ${data.filename}</span>` +
     `<span style="color:var(--text2)"> · ${cfg.adapter_type} rank ${cfg.rank}${stepHint}</span> ` +
-    `<a href="#" onclick="event.preventDefault();_clearSeedLora();setLoraSourceTab('new');return false;" ` +
-    `style="color:#9af;font-size:0.9em">clear</a>`;
+    `<a href="#" onclick="event.preventDefault();_clearSeedLora();return false;" ` +
+    `style="color:#9af;font-size:0.9em">[clear]</a>`;
   validateNewFt();
   updateCkptEstimate();
 };
@@ -5705,13 +5711,8 @@ window.openNewFinetuneModal = async function() {
   document.getElementById('new-ft-ckpt-every').value = '1000';
   document.getElementById('new-ft-demo-every').value = '1000';
   document.getElementById('new-ft-next-btn').disabled = true;
-  // Reset LoRA source tab + clear any seed from a prior open
+  // Clear any seed from a prior open (restores the load button)
   if (typeof _clearSeedLora === 'function') _clearSeedLora();
-  const _newTabBtn = document.getElementById('new-ft-lora-tab-new');
-  const _loadTabBtn = document.getElementById('new-ft-lora-tab-load');
-  if (_newTabBtn) _newTabBtn.className = 'modal-launch';
-  if (_loadTabBtn) _loadTabBtn.className = 'modal-cancel';
-  _newFtLoraSource = 'new';
   updateCkptEstimate();
   // Reset to Step 1
   document.getElementById('new-ft-step1').style.display = '';

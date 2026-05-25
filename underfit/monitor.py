@@ -54,6 +54,49 @@ def _tail_lines(path: str, n: int = 3) -> list[str]:
     return lines[-n:]
 
 
+def _disk_usage(path: str) -> dict | None:
+    """Return {used_gb, total_gb, pct, path} or None if path can't be statfs'd.
+    Catches FUSE/timeout/permission errors so a stale Drive mount can't
+    break the whole monitor."""
+    import shutil
+    try:
+        u = shutil.disk_usage(path)
+    except (FileNotFoundError, PermissionError, OSError):
+        return None
+    if u.total <= 0:
+        return None
+    return {
+        "path": path,
+        "used_gb": round(u.used / 1e9, 1),
+        "total_gb": round(u.total / 1e9, 1),
+        "pct": round(100 * u.used / u.total, 1),
+    }
+
+
+def _disks() -> list[dict]:
+    """Disk usage for the local filesystem and (if mounted) Google Drive.
+    Each entry: {label, path, used_gb, total_gb, pct, level}.
+    level ∈ {'ok', 'warn', 'critical'} based on pct."""
+    out = []
+    # Local: prefer /content (Colab convention), fall back to root.
+    local_path = "/content" if os.path.isdir("/content") else "/"
+    local = _disk_usage(local_path)
+    if local is not None:
+        local["label"] = "Local"
+        out.append(local)
+    # Google Drive — only when actually mounted. A bare /content/drive folder
+    # without MyDrive means Drive didn't mount.
+    drive_path = "/content/drive/MyDrive"
+    if os.path.isdir(drive_path):
+        drive = _disk_usage(drive_path)
+        if drive is not None:
+            drive["label"] = "Drive"
+            out.append(drive)
+    for d in out:
+        d["level"] = "critical" if d["pct"] >= 90 else "warn" if d["pct"] >= 80 else "ok"
+    return out
+
+
 def _latest_run_log(runs: list[dict]) -> dict | None:
     """Pick the run whose log file mtime is most recent. None if no run has
     a readable log on disk."""
@@ -143,6 +186,7 @@ def fetch_status(base_url: str = "http://localhost:8787") -> dict[str, Any]:
         "status_counts": status_counts,
         "ram": ram,
         "gpus": gpus,
+        "disks": _disks(),
         "latest_run_log": latest,
     }
 
@@ -169,6 +213,9 @@ def format_text(data: dict[str, Any]) -> str:
         gt = g["total_mb"] / 1024
         gp = g.get("peak_mb", 0) / 1024
         parts.append(f"GPU{g['gpu']}: {gu:.1f}/{gt:.1f} GB (peak {gp:.1f}, {g.get('util_pct', 0)}%)")
+    for d in data.get("disks", []):
+        warn = " ⚠" if d["level"] == "critical" else ""
+        parts.append(f"{d['label']}: {d['used_gb']:.1f}/{d['total_gb']:.1f} GB ({d['pct']:.0f}%){warn}")
     out = " | ".join(parts)
     log = data.get("latest_run_log")
     if log and log.get("tail"):
@@ -203,6 +250,16 @@ def format_html(data: dict[str, Any]) -> str:
         pct = 100 * gu / max(gt, 0.001)
         lines.append(f"  GPU {g['gpu']:>2}:    {gu:5.1f} / {gt:5.1f} GB  "
                      f"({pct:4.1f}%, peak {gp:5.1f} GB, util {g.get('util_pct', 0):>3}%)")
+    for d in data.get("disks", []):
+        color = {"critical": "#e44", "warn": "#dc4", "ok": ""}[d["level"]]
+        warn = " ⚠ near full" if d["level"] == "critical" else \
+               " (running low)" if d["level"] == "warn" else ""
+        style = f" style='color:{color}'" if color else ""
+        label = (d["label"] + ":").ljust(8)
+        lines.append(
+            f"  <span{style}>{label}  {d['used_gb']:5.1f} / {d['total_gb']:5.1f} GB  "
+            f"({d['pct']:4.1f}%){warn}</span>"
+        )
     log = data.get("latest_run_log")
     if log and log.get("tail"):
         lines.append("")

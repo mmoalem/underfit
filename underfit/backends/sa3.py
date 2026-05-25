@@ -310,7 +310,12 @@ def create_dataloader(dataset_config, batch_size, sample_size, sample_rate,
         shuffle=shuffle,
         num_workers=num_workers,
         collate_fn=collation_fn,
-        drop_last=True,
+        # underfit is for small-dataset LoRA finetuning — single GPU, no
+        # BatchNorm, step count driven by --max-steps not steps-per-epoch.
+        # The upstream default of drop_last=True silently drops every
+        # batch when num_files < batch_size (e.g. 1-track datasets ->
+        # 0 iterations per epoch), which is the opposite of what we want.
+        drop_last=False,
     )
 
 

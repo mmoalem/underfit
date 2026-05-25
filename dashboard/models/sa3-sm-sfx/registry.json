@@ -2,7 +2,10 @@
   "key": "sa3-sm-sfx",
   "label": "SA3-small-SFX",
   "description": "~530M, 120s, SAME-S encoder, T5-Gemma (SFX, ARC)",
-  "backends": ["sa3", "sat_dev"],
+  "backends": [
+    "sa3",
+    "sat_dev"
+  ],
   "diffusion_objective": "rectified_flow",
   "_comment_encoder_id": "Identifies the autoencoder family. Models with the same encoder_id share a latent space \u2014 datasets pre-encoded for one are reusable across all. Verified by pretransform weight equality.",
   "encoder_id": "SAME-S",
@@ -159,7 +162,7 @@
         {
           "suffix": ".self_attn.to_qkv",
           "fi": 1024,
-          "fo": 5120
+          "fo": 3072
         },
         {
           "suffix": ".self_attn.to_out",
@@ -169,12 +172,12 @@
         {
           "suffix": ".cross_attn.to_q",
           "fi": 1024,
-          "fo": 2048
+          "fo": 1024
         },
         {
           "suffix": ".cross_attn.to_kv",
           "fi": 1024,
-          "fo": 3072
+          "fo": 2048
         },
         {
           "suffix": ".cross_attn.to_out",

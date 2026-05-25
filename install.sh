@@ -2,8 +2,9 @@
 # Underfit installer
 #
 # Usage:
-#     ./install.sh             # full flow: install uv (if missing) + uv sync + underfit-setup
-#     ./install.sh --no-setup  # stop after `uv sync`, skip the underfit-setup wizard
+#     ./install.sh                  # full flow: install uv (if missing) + uv sync + underfit-setup
+#     ./install.sh --no-setup       # stop after `uv sync`, skip the underfit-setup wizard
+#     ./install.sh --backend sat    # opt into stable-audio-tools (default is sa3)
 #
 # Idempotent: re-running upgrades anything missing and leaves the rest alone.
 
@@ -13,15 +14,22 @@ UNDERFIT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$UNDERFIT_DIR"
 
 SKIP_SETUP=0
-for arg in "$@"; do
-    case "$arg" in
-        --no-setup) SKIP_SETUP=1 ;;
+BACKEND=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --no-setup) SKIP_SETUP=1; shift ;;
+        --backend)
+            if [ $# -lt 2 ]; then
+                echo "✗ --backend requires a value (sa3 | sat)"; exit 1
+            fi
+            BACKEND="$2"; shift 2 ;;
+        --backend=*) BACKEND="${1#--backend=}"; shift ;;
         -h|--help)
-            sed -n '2,9p' "${BASH_SOURCE[0]}"
+            sed -n '2,10p' "${BASH_SOURCE[0]}"
             exit 0
             ;;
         *)
-            echo "unknown flag: $arg"
+            echo "unknown flag: $1"
             echo "use --help for usage"
             exit 1
             ;;
@@ -71,4 +79,8 @@ if [ "$SKIP_SETUP" -eq 1 ]; then
     exit 0
 fi
 say "launching underfit-setup …"
-uv run python -m underfit.cli.setup
+if [ -n "$BACKEND" ]; then
+    uv run python -m underfit.cli.setup --backend "$BACKEND"
+else
+    uv run python -m underfit.cli.setup
+fi

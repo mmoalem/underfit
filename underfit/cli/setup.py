@@ -67,10 +67,18 @@ BACKENDS: list[Backend] = [
         description="Stability-AI/stable-audio-3 — simplified SA3 codebase",
         extras=("lora", "ui"),  # lora: dill/PL for dataloader; ui: gradio for run_gradio.py
     ),
+    # sat is opt-in only — passing --backend sat picks it; the wizard never
+    # prompts and the default is BACKENDS[0] (sa3).
+    Backend(
+        key="sat",
+        label="stable-audio-tools",
+        module="stable_audio_tools",
+        clone_url="https://github.com/Stability-AI/stable-audio-tools.git",
+        sibling_dirname="stable-audio-tools",
+        description="Stability-AI/stable-audio-tools (opt-in via --backend sat)",
+        extras=("train", "ui"),  # train: PL/prefigure/etc; ui: gradio for run_gradio.py
+    ),
 ]
-# Note: the sat (stable-audio-tools) backend module is still present at
-# underfit/backends/sat.py for revival, but the wizard no longer offers
-# it — installs always pick sa3.
 
 
 # ── SA3 MODEL PACKS ──────────────────────────────────────────────────────────
@@ -619,11 +627,11 @@ def _provision_backend(backend: Backend, args) -> bool:
 def run_backend_phase(args) -> Backend | None:
     """Returns the chosen Backend, or None if provisioning failed.
 
-    The wizard no longer prompts — there's only one supported backend (sa3)
-    and it's selected automatically. The `--backend` arg is still parsed so
-    existing CI / colab invocations don't break, but it must be 'sa3'.
+    The wizard never prompts. The default is BACKENDS[0] (sa3); pass
+    `--backend sat` to opt into stable-audio-tools instead.
     """
-    chosen = BACKENDS[0]
+    chosen_key = args.backend or BACKENDS[0].key
+    chosen = next(b for b in BACKENDS if b.key == chosen_key)
     installed = installed_backend_keys()
     print(f"backend: {chosen.label} ({chosen.key}) — "
           f"{'already installed' if chosen.key in installed else 'will be installed'}")
@@ -712,20 +720,20 @@ def run_model_phase(args, backend: Backend) -> int:
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(
         prog="underfit-setup",
-        description="Install the stable-audio-3 backend and download SA3 model packs for underfit.",
+        description="Install a Stable Audio backend (sa3 by default, sat is opt-in) "
+                    "and download SA3 model packs for underfit.",
     )
-    # `--backend` accepted for back-compat with old colab invocations; only
-    # value is 'sa3'. The wizard no longer prompts.
     p.add_argument(
         "--backend",
         choices=[b.key for b in BACKENDS],
-        help=argparse.SUPPRESS,
+        default=None,
+        help=f"Which backend to install (default: {BACKENDS[0].key}).",
     )
     p.add_argument(
         "--backend-path",
         metavar="PATH",
         default=None,
-        help=("Path to a local stable-audio-3 source tree (skips the auto clone-or-reuse step). "
+        help=("Path to a local backend source tree (skips the auto clone-or-reuse step). "
               "Must contain pyproject.toml + the backend's package directory. "
               "Useful for Colab and other headless setups."),
     )

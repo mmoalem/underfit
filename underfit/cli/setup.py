@@ -644,10 +644,13 @@ def run_backend_phase(args) -> Backend | None:
 
 
 def run_model_phase(args, backend: Backend) -> int:
-    """Returns process exit code. Only runs for sa3 backend."""
-    if backend.key != "sa3":
-        return 0  # nothing to do for sat (it sources its own checkpoints)
+    """Download SA3 model packs from HuggingFace.
 
+    Runs for both backends — the SA3 model registries declare
+    backends=['sa3', 'sat'], meaning each pack is usable from either
+    underfit backend. So the offer-to-download UX is identical regardless
+    of which backend the user picked in the prior phase.
+    """
     user = hf_whoami()
     if not user:
         print_hf_login_help()
@@ -662,7 +665,7 @@ def run_model_phase(args, backend: Backend) -> int:
 
     # If everything's staged, skip the menu entirely.
     if all(s == "staged" for s in pack_states.values()):
-        print("✓ All Stable Audio 3 model packs are already staged — nothing to do.")
+        print("✓ All model packs are already staged — nothing to do.")
         return 0
 
     missing = [p for p in SA3_PACKS if p.key not in installed]

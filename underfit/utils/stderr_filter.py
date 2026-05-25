@@ -43,6 +43,13 @@ NOISE_RE = re.compile(
     r"|\s+verify_each:"
     r"|/tmp/torchinductor_[^/]+/.*:\d+:\d+:"        # MLIR error location lines
     r"|#-\}"                                        # MLIR comment closer
+    # ── Inductor autotuner output ──────────────────────────────────────
+    # Fires every time a new attention shape is seen. Verbose, line-noise,
+    # and the cached winner is what actually runs — autotune lines have
+    # no diagnostic value for the user during normal training.
+    r"|AUTOTUNE\s+\w+\("                            # banner: 'AUTOTUNE flex_attention(...)'
+    r"|\s+triton_\w+_\d+\s+[\d.]+\s+ms\s+"          # candidate row: '  triton_flex_attention_N 0.53 ms 100.0% ...'
+    r"|SingleProcess\s+AUTOTUNE\s+"                 # footer: 'SingleProcess AUTOTUNE benchmarking takes ...'
     r")"
 )
 

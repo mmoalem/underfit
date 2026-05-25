@@ -65,7 +65,7 @@ BACKENDS: list[Backend] = [
         clone_url="https://github.com/Stability-AI/stable-audio-tools.git",
         sibling_dirname="stable-audio-tools",
         description="Stability-AI/stable-audio-tools",
-        extras=("train",),  # pytorch_lightning, prefigure, torchmetrics, etc.
+        extras=("train", "ui"),  # train: PL/prefigure/etc; ui: gradio for run_gradio.py
     ),
     Backend(
         key="sa3",
@@ -74,7 +74,7 @@ BACKENDS: list[Backend] = [
         clone_url="https://github.com/Stability-AI/stable-audio-3.git",
         sibling_dirname="stable-audio-3",
         description="Stability-AI/stable-audio-3 — simplified SA3 codebase",
-        extras=("lora",),   # dill, pytorch_lightning — required by SA3's dataloader
+        extras=("lora", "ui"),  # lora: dill/PL for dataloader; ui: gradio for run_gradio.py
     ),
 ]
 

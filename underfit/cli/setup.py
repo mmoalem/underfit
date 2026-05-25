@@ -394,19 +394,20 @@ def print_hf_login_help() -> None:
 # ── MODEL DOWNLOAD + STAGING ─────────────────────────────────────────────────
 
 
-def _checkpoints_dir() -> Path:
-    """Where to download SA3 model packs. Defaults to STATE_DIR/checkpoints —
-    on Colab, point UNDERFIT_CHECKPOINTS_DIR at /content/checkpoints so model
-    files live on local SSD (fast reads) instead of Drive (slow + FUSE-flaky)."""
-    env = os.environ.get("UNDERFIT_CHECKPOINTS_DIR")
+def _models_dir() -> Path:
+    """Where to download SA3 model packs. Defaults to STATE_DIR/models —
+    on Colab, point UNDERFIT_MODELS_DIR at /content/models so model files
+    live on local SSD (fast reads) instead of Drive (slow + FUSE-flaky).
+    Distinct from per-run LoRA *training* checkpoints (those go in RUNS_DIR)."""
+    env = os.environ.get("UNDERFIT_MODELS_DIR")
     if env:
         return Path(env).expanduser()
-    return state_dir() / "checkpoints"
+    return state_dir() / "models"
 
 
 def staged_pack_keys() -> set[str]:
     """Set of SA3 pack keys with downloaded model files on disk."""
-    d = _checkpoints_dir()
+    d = _models_dir()
     if not d.is_dir():
         return set()
     return {p.parent.parent.name for p in d.glob("*/base/model.safetensors") if p.is_file()}
@@ -463,14 +464,15 @@ def _download_repo(repo_id: str, target_dir: Path) -> Path | None:
 
 def _pack_dir(p: SA3Pack) -> Path:
     """Where the wizard downloads model files for pack <p.key>.
-    Resolves to {checkpoints_dir} in the shipped registry."""
-    return _checkpoints_dir() / p.key
+    Resolves to {models_dir} in the shipped registry."""
+    return _models_dir() / p.key
 
 
 def install_pack(p: SA3Pack) -> bool:
-    """Download both the base (RF) and ARC repos into STATE_DIR/checkpoints/<key>/
-    {base,arc}/. The shipped registry's {checkpoints_dir} placeholder will
-    resolve to these paths at dashboard startup."""
+    """Download both the base (RF) and ARC repos into MODELS_DIR/<key>/
+    {base,arc}/ (default STATE_DIR/models, overridable via UNDERFIT_MODELS_DIR).
+    The shipped registry's {models_dir} placeholder resolves to that path
+    at dashboard startup."""
     print(f"\n══ {p.label} ══")
     pack_dir = _pack_dir(p)
     if _download_repo(p.base_repo, pack_dir / "base") is None:

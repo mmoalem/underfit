@@ -60,14 +60,15 @@ _MODELS_SHIPPED_DIR = _DASHBOARD_DIR / "models"  # per-model {registry.json, tra
 # Per-instance state — defaults to <repo>/state/.
 _STATE_DIR = Path(os.environ.get("UNDERFIT_STATE_DIR", _REPO_ROOT / "state")).expanduser()
 
-# Model checkpoints. By default lives at STATE_DIR/checkpoints, but
-# UNDERFIT_CHECKPOINTS_DIR can relocate it (e.g. /content/checkpoints on Colab,
-# so model files live on local SSD instead of slow Drive).
-_CHECKPOINTS_DIR = Path(os.environ.get(
-    "UNDERFIT_CHECKPOINTS_DIR", _STATE_DIR / "checkpoints"
+# Base-model files. By default lives at STATE_DIR/models, but
+# UNDERFIT_MODELS_DIR can relocate (e.g. /content/models on Colab, so model
+# files live on local SSD instead of slow Drive). Distinct from per-run
+# LoRA training "checkpoints" — those live in RUNS_DIR.
+_MODELS_DIR = Path(os.environ.get(
+    "UNDERFIT_MODELS_DIR", _STATE_DIR / "models"
 )).expanduser()
 
-_path_subs = {"{checkpoints_dir}": str(_CHECKPOINTS_DIR)}
+_path_subs = {"{models_dir}": str(_MODELS_DIR)}
 
 def _resolve(s):
     if not isinstance(s, str):
@@ -77,7 +78,7 @@ def _resolve(s):
     return s
 
 # MODEL_PATHS[key] -> Path to the per-model dir containing config + ckpt symlinks.
-# Defaults to CHECKPOINTS_DIR/<key>/ unless the JSON overrides via paths.pre_encode_dir.
+# Defaults to MODELS_DIR/<key>/ unless the JSON overrides via paths.pre_encode_dir.
 MODEL_PATHS = {}
 MODELS = {}
 for _registry_path in sorted(_MODELS_SHIPPED_DIR.glob("*/registry.json")):
@@ -86,7 +87,7 @@ for _registry_path in sorted(_MODELS_SHIPPED_DIR.glob("*/registry.json")):
     _key = _m["key"]
     MODELS[_key] = _m.get("description", "")
     _ped = _m.get("paths", {}).get("pre_encode_dir")
-    MODEL_PATHS[_key] = Path(_resolve(_ped)) if _ped else (_CHECKPOINTS_DIR / _key)
+    MODEL_PATHS[_key] = Path(_resolve(_ped)) if _ped else (_MODELS_DIR / _key)
 
 MODEL_NAMES = list(MODELS.keys())
 
@@ -691,7 +692,7 @@ def main():
 
     # --- Read config (no model instantiation yet) -----------------------------
 
-    model_dir   = MODEL_PATHS.get(model_name, _CHECKPOINTS_DIR / model_name)
+    model_dir   = MODEL_PATHS.get(model_name, _MODELS_DIR / model_name)
     # Resolve symlinks so downstream loaders that dispatch on file extension
     # (e.g. stable_audio_tools.models.utils.load_ckpt_state_dict, which
     # branches on .safetensors vs .pt) see the real target's name.

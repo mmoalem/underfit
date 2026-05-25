@@ -46,11 +46,13 @@ PRE_DIR = BASE_DIR / "dataset_processing"       # autotagger, pre_encode, metada
 RUNS_DIR = STATE_DIR / "runs"                   # per-run checkpoints, logs, generated dataset configs
 AUDIO_DIR = STATE_DIR / "audio"                 # generated demo MP3s + spectrogram JPGs
 
-# Model checkpoints — defaults to STATE_DIR/checkpoints, but UNDERFIT_CHECKPOINTS_DIR
-# lets you put them somewhere fast on machines where STATE_DIR lives on slow
-# storage (e.g. Colab: STATE_DIR on Drive + CHECKPOINTS_DIR on /content/ SSD).
-CHECKPOINTS_DIR = Path(os.environ.get(
-    "UNDERFIT_CHECKPOINTS_DIR", STATE_DIR / "checkpoints"
+# Base-model files (SA3 RF + ARC, T5Gemma) — defaults to STATE_DIR/models,
+# but UNDERFIT_MODELS_DIR lets you put them somewhere fast on machines where
+# STATE_DIR lives on slow storage (e.g. Colab: STATE_DIR on Drive +
+# MODELS_DIR on /content/ SSD). Distinct from per-run LoRA *training*
+# checkpoints (which live in RUNS_DIR and use the field name "checkpoints_dir").
+MODELS_DIR = Path(os.environ.get(
+    "UNDERFIT_MODELS_DIR", STATE_DIR / "models"
 )).expanduser()
 RUNS_FILE = STATE_DIR / "runs.json"
 PORT = int(os.environ.get("UNDERFIT_DASHBOARD_PORT", 8787))
@@ -79,7 +81,7 @@ def _get_model_info(name):
 
 # ── Model JSON loader (spike) ────────────────────────────────────────────
 # Per-model registry files in dashboard/models/<key>/registry.json. Each
-# uses the {checkpoints_dir} placeholder so the registry stays portable —
+# uses the {models_dir} placeholder so the registry stays portable —
 # only STATE_DIR has to be set correctly for paths to resolve. Adding a new
 # model = mkdir dashboard/models/<new-key>/ + drop in registry.json and
 # training_template.json. No Python edits, no JS edits.
@@ -112,7 +114,7 @@ def _load_models_from_json():
     """Walk dashboard/models/*/registry.json and merge into MODEL_INFO / ENCODING_MODELS / SHARED_ENCODERS."""
     if not MODELS_SHIPPED_DIR.is_dir():
         return
-    subs = {"checkpoints_dir": str(CHECKPOINTS_DIR)}
+    subs = {"models_dir": str(MODELS_DIR)}
     for registry_path in sorted(MODELS_SHIPPED_DIR.glob("*/registry.json")):
         with open(registry_path) as f:
             raw = _json.load(f)
@@ -143,8 +145,8 @@ def _load_models_from_json():
         MODEL_INFO[key] = entry
 
         # Per-model symlink dir for tools that prefer a stable local path
-        # (e.g. pre_encode.py reads CHECKPOINTS_DIR/<key>/{config,ckpt}).
-        _model_dir = CHECKPOINTS_DIR / key
+        # (e.g. pre_encode.py reads MODELS_DIR/<key>/{config,ckpt}).
+        _model_dir = MODELS_DIR / key
         _model_dir.mkdir(parents=True, exist_ok=True)
         _link_specs = [
             ("config",     paths.get("base_config")),

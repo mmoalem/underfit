@@ -12,10 +12,10 @@
   ],
   "encoder_canonical_model": "sa3",
   "paths": {
-    "base_config": "{checkpoints_dir}/sa3-medium/base/model_config.json",
-    "base_ckpt": "{checkpoints_dir}/sa3-medium/base/model.safetensors",
-    "arc_config": "{checkpoints_dir}/sa3-medium/arc/model_config.json",
-    "arc_ckpt": "{checkpoints_dir}/sa3-medium/arc/model.safetensors"
+    "base_config": "{models_dir}/sa3-medium/base/model_config.json",
+    "base_ckpt": "{models_dir}/sa3-medium/base/model.safetensors",
+    "arc_config": "{models_dir}/sa3-medium/arc/model_config.json",
+    "arc_ckpt": "{models_dir}/sa3-medium/arc/model.safetensors"
   },
   "arc": {
     "type": "full_model"

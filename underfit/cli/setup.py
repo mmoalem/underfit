@@ -420,18 +420,62 @@ def staged_pack_keys() -> set[str]:
     return {p.parent.parent.name for p in d.glob("*/base/model.safetensors") if p.is_file()}
 
 
-def _ask_packs(missing: list[SA3Pack], installed: set[str]) -> list[SA3Pack]:
-    """Prompt the user once per missing pack; defaults to Y."""
+def _pack_in_hf_cache(pack: SA3Pack) -> bool:
+    """True if BOTH the base and ARC repos' main files are in the HF cache.
+    A cache hit means snapshot_download will copy locally without going to
+    the network — useful signal to print before the user picks packs."""
+    try:
+        from huggingface_hub import try_to_load_from_cache
+    except ImportError:
+        return False
+    for repo in (pack.base_repo, pack.arc_repo):
+        try:
+            if try_to_load_from_cache(repo, pack.ckpt_filename) is None:
+                return False
+            if try_to_load_from_cache(repo, pack.config_filename) is None:
+                return False
+        except Exception:
+            return False
+    return True
+
+
+def _print_pack_inventory(installed: set[str]) -> dict[str, str]:
+    """Print a summary of pack status: which are fully staged, which are
+    in HF cache (would copy fast), which are missing. Returns the per-pack
+    state dict for downstream use."""
+    state: dict[str, str] = {}
+    print()
+    print("Checking local cache for Stable Audio 3 model packs…")
+    print()
+    for p in SA3_PACKS:
+        if p.key in installed:
+            state[p.key] = "staged"
+            print(f"  ✓ {p.label:<18s} already staged at {_pack_dir(p)}")
+        elif _pack_in_hf_cache(p):
+            state[p.key] = "cached"
+            print(f"  ↺ {p.label:<18s} in HF cache (would copy locally, no download)")
+        else:
+            state[p.key] = "missing"
+            print(f"  · {p.label:<18s} not found")
+    print()
+    return state
+
+
+def _ask_packs(missing: list[SA3Pack], installed: set[str], states: dict[str, str] | None = None) -> list[SA3Pack]:
+    """Prompt the user once per missing pack; defaults to Y. Annotates the
+    prompt with whether the pack is already in the HF cache (cached → fast
+    copy) or actually needs a network download."""
     if not missing:
         return []
-    print()
-    print("Which Stable Audio 3 model packs would you like to download?")
-    print("(downloads from the stabilityai HF org; each pack is multi-GB)")
+    states = states or {}
+    print("Pick which packs to add (each is multi-GB):")
     print()
     selected: list[SA3Pack] = []
     for p in missing:
+        st = states.get(p.key, "missing")
+        tag = "  (in HF cache — fast copy)" if st == "cached" else "  (will download from HF)"
         try:
-            ans = input(f"  [Y/n] {p.label}: ").strip().lower()
+            ans = input(f"  [Y/n] {p.label}{tag}: ").strip().lower()
         except (EOFError, KeyboardInterrupt):
             print()
             sys.exit(1)
@@ -611,8 +655,15 @@ def run_model_phase(args, backend: Backend) -> int:
     print(f"\nHuggingFace: logged in as {user!r}")
 
     installed = staged_pack_keys()
-    if installed:
-        print(f"already staged: {', '.join(sorted(installed))}")
+    # Per-pack status report (staged | cached | missing) — shown BEFORE the
+    # menu so the user knows what already exists and what would actually be
+    # downloaded.
+    pack_states = _print_pack_inventory(installed)
+
+    # If everything's staged, skip the menu entirely.
+    if all(s == "staged" for s in pack_states.values()):
+        print("✓ All Stable Audio 3 model packs are already staged — nothing to do.")
+        return 0
 
     missing = [p for p in SA3_PACKS if p.key not in installed]
 
@@ -625,7 +676,7 @@ def run_model_phase(args, backend: Backend) -> int:
             return 1
         selected = [p for p in SA3_PACKS if p.key in wanted and p.key not in installed]
     else:
-        selected = _ask_packs(missing, installed)
+        selected = _ask_packs(missing, installed, pack_states)
 
     if not selected:
         if installed:

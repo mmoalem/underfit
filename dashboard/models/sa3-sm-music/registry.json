@@ -2,7 +2,7 @@
   "key": "sa3-sm-music",
   "label": "SA3-small-music",
   "description": "~530M, 120s, SAME-S encoder, T5-Gemma (music, ARC)",
-  "backend": "sat_dev",
+  "backend": "sa3",
   "diffusion_objective": "rectified_flow",
   "encoder_id": "SAME-S",
   "_comment_compatible_encoders": "Encoder ids whose datasets can train this model. SAME-S is a distillation of SAME-L, so latents are interchangeable in either direction.",

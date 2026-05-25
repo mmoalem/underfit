@@ -55,8 +55,14 @@ fi
 say "uv $(uv --version | awk '{print $2}') ready"
 
 # ── 2. deps ────────────────────────────────────────────────────────────────
-say "syncing dependencies (uv sync) …"
-uv sync
+say "syncing dependencies (uv sync --inexact) …"
+# --inexact: keep packages uv sync didn't put there. The setup wizard
+# installs the diffusion backend (stable-audio-3 / stable-audio-tools) via
+# `uv pip install -e <path>[lora,ui]` after this step. Plain `uv sync`
+# would treat that backend install as "extraneous" on the next run and
+# remove it — leaving the dashboard with NONE_IMPORTABLE on startup until
+# the wizard is re-run. --inexact skips that prune.
+uv sync --inexact
 
 # ── 3. wizard ──────────────────────────────────────────────────────────────
 if [ "$SKIP_SETUP" -eq 1 ]; then

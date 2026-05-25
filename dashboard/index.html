@@ -4578,6 +4578,17 @@ function _defaultNewFtDemos(preset) {
 // RF + 3rd ARC (legacy positions).
 const _DEMO_PRESET_EMPTY_IDX = {2: [], 4: [1, 3], 8: [3, 6]};
 
+// Default per-demo duration depending on preset:
+//   Eight  — demos 0 (first RF) and 4 (first ARC) default to the model's native
+//            length so the user always has a long-form reference; the rest use
+//            the training crop length.
+//   Two/Four — every demo defaults to the training crop length. These presets
+//            exist for quick previews on slow GPUs; full-length defeats the point.
+function _defaultDemoDurationLatents(idx, cropLen, nativeLen) {
+  if (_newFtPreset === 8 && (idx === 0 || idx === 4)) return nativeLen;
+  return cropLen;
+}
+
 let _newFtDemos = _defaultNewFtDemos(8);
 
 function _renderDemoEntries() {
@@ -4735,11 +4746,9 @@ function _renderDemoEntries() {
     if (_cropLen && _cropLen !== _nativeLen) {
       const _cropSec = (_cropLen * _seqInfo.dsRatio / _seqInfo.sr).toFixed(0);
       const _nativeSec = (_nativeLen * _seqInfo.dsRatio / _seqInfo.sr).toFixed(0);
-      // Default rule: demos 0 and 4 (first of each group: RF and ARC) generate
-      // at the model's full native length so the user always has a long-form
-      // reference alongside the crop-length demos. Other demos default to crop
-      // length. d.duration_latents (set by clicking the toggle) overrides.
-      const _defaultDur = (i === 0 || i === 4) ? _nativeLen : _cropLen;
+      // Default duration depends on preset (see _defaultDemoDurationLatents).
+      // d.duration_latents (set by clicking the toggle) overrides.
+      const _defaultDur = _defaultDemoDurationLatents(i, _cropLen, _nativeLen);
       const curDur = d.duration_latents || _defaultDur;
       const durWrap = document.createElement('div');
       durWrap.style.cssText = 'display:flex;border-radius:4px;overflow:hidden;border:1px solid rgba(255,255,255,0.15);cursor:pointer;margin-left:auto';
@@ -4755,7 +4764,7 @@ function _renderDemoEntries() {
       durWrap.onclick = function() {
         const idx = +this.dataset.idx;
         const demo = _newFtDemos[idx];
-        const defDur = (idx === 0 || idx === 4) ? _nativeLen : _cropLen;
+        const defDur = _defaultDemoDurationLatents(idx, _cropLen, _nativeLen);
         const cur = demo.duration_latents || defDur;
         demo.duration_latents = cur === _cropLen ? _nativeLen : _cropLen;
         _renderDemoEntries();
@@ -5720,10 +5729,9 @@ window.confirmNewFinetune = async function() {
     if (!d.prompt) entry.fixed_prompt = true;
     const _si = _modelSeqInfo[document.getElementById('new-ft-base-model').value] || _modelSeqInfo['sa3'];
     const _cropL = parseInt(document.getElementById('new-ft-crop-length').value) || _si.length;
-    // Same default rule as _renderDemoEntries: when the training crop length
-    // differs from the model's native length, demos 0 and 4 default to native;
-    // others to crop. d.duration_latents (toggle override) wins.
-    const _defaultDur = (_cropL !== _si.length && (i === 0 || i === 4)) ? _si.length : _cropL;
+    // Same default rule as _renderDemoEntries (preset-aware via _defaultDemoDurationLatents).
+    // d.duration_latents (toggle override) wins.
+    const _defaultDur = _defaultDemoDurationLatents(i, _cropL, _si.length);
     const effectiveDur = d.duration_latents || _defaultDur;
     if (effectiveDur !== _cropL) {
       entry.duration = effectiveDur * _si.dsRatio / _si.sr;

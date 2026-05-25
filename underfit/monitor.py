@@ -14,7 +14,9 @@ CLI:
 """
 from __future__ import annotations
 
+import html as _html
 import json
+import os
 import time
 import urllib.error
 import urllib.request
@@ -32,6 +34,46 @@ def _get(url: str, fallback: Any) -> Any:
 
 
 _PEAKS: dict[str, float] = {}  # session peaks (RAM in GB, per-GPU VRAM in MB)
+
+
+def _tail_lines(path: str, n: int = 3) -> list[str]:
+    """Return the last `n` non-blank lines of `path` (best-effort).
+
+    Reads at most 16 KB from the end so it stays cheap even on multi-MB logs.
+    On Colab the log lives on Drive (FUSE) — small tail reads are fine.
+    """
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, 2)
+            size = f.tell()
+            f.seek(max(0, size - 16384))
+            data = f.read().decode("utf-8", errors="replace")
+    except OSError:
+        return []
+    lines = [ln for ln in data.splitlines() if ln.strip()]
+    return lines[-n:]
+
+
+def _latest_run_log(runs: list[dict]) -> dict | None:
+    """Pick the run whose log file mtime is most recent. None if no run has
+    a readable log on disk."""
+    best = None
+    for r in runs:
+        lp = r.get("log_path")
+        if not lp:
+            continue
+        try:
+            mt = os.path.getmtime(lp)
+        except OSError:
+            continue
+        if best is None or mt > best["mtime"]:
+            best = {
+                "name": r.get("name") or r.get("id") or "?",
+                "path": lp,
+                "mtime": mt,
+                "status": r.get("status", "?"),
+            }
+    return best
 
 
 def fetch_status(base_url: str = "http://localhost:8787") -> dict[str, Any]:
@@ -86,6 +128,11 @@ def fetch_status(base_url: str = "http://localhost:8787") -> dict[str, Any]:
         _PEAKS[key] = max(_PEAKS.get(key, 0.0), g.get("used_mb", 0))
         g["peak_mb"] = int(_PEAKS[key])
 
+    # Tail of the most-recently-modified run log
+    latest = _latest_run_log(runs)
+    if latest is not None:
+        latest["tail"] = _tail_lines(latest["path"], 3)
+
     return {
         "runs": runs,
         "datasets": datasets,
@@ -96,6 +143,7 @@ def fetch_status(base_url: str = "http://localhost:8787") -> dict[str, Any]:
         "status_counts": status_counts,
         "ram": ram,
         "gpus": gpus,
+        "latest_run_log": latest,
     }
 
 
@@ -121,7 +169,13 @@ def format_text(data: dict[str, Any]) -> str:
         gt = g["total_mb"] / 1024
         gp = g.get("peak_mb", 0) / 1024
         parts.append(f"GPU{g['gpu']}: {gu:.1f}/{gt:.1f} GB (peak {gp:.1f}, {g.get('util_pct', 0)}%)")
-    return " | ".join(parts)
+    out = " | ".join(parts)
+    log = data.get("latest_run_log")
+    if log and log.get("tail"):
+        out += f"\n  📜 {log['name']} ({os.path.basename(log['path'])})"
+        for line in log["tail"]:
+            out += f"\n     {line}"
+    return out
 
 
 def format_html(data: dict[str, Any]) -> str:
@@ -149,7 +203,18 @@ def format_html(data: dict[str, Any]) -> str:
         pct = 100 * gu / max(gt, 0.001)
         lines.append(f"  GPU {g['gpu']:>2}:    {gu:5.1f} / {gt:5.1f} GB  "
                      f"({pct:4.1f}%, peak {gp:5.1f} GB, util {g.get('util_pct', 0):>3}%)")
-    return ("<pre style='margin:0;font-family:monospace;line-height:1.4'>"
+    log = data.get("latest_run_log")
+    if log and log.get("tail"):
+        lines.append("")
+        lines.append(
+            f"<span style='color:#888'>📜 <b>{_html.escape(str(log['name']))}</b> "
+            f"<span style='color:#666'>({_html.escape(os.path.basename(log['path']))})"
+            f"</span></span>"
+        )
+        for line in log["tail"]:
+            lines.append(f"   <span style='color:#aaa'>{_html.escape(line)}</span>")
+    return ("<pre style='margin:0;font-family:monospace;line-height:1.4;"
+            "white-space:pre-wrap;word-break:break-word'>"
             + "\n".join(lines) + "</pre>")
 
 

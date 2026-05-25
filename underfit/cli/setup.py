@@ -453,7 +453,7 @@ def _print_pack_inventory(installed: set[str]) -> dict[str, str]:
             print(f"  ✓ {p.label:<18s} already staged at {_pack_dir(p)}")
         elif _pack_in_hf_cache(p):
             state[p.key] = "cached"
-            print(f"  ↺ {p.label:<18s} in HF cache (would copy locally, no download)")
+            print(f"  ↺ {p.label:<18s} in HF cache (would symlink, no download)")
         else:
             state[p.key] = "missing"
             print(f"  · {p.label:<18s} not found")
@@ -473,7 +473,7 @@ def _ask_packs(missing: list[SA3Pack], installed: set[str], states: dict[str, st
     selected: list[SA3Pack] = []
     for p in missing:
         st = states.get(p.key, "missing")
-        tag = "  (in HF cache — fast copy)" if st == "cached" else "  (will download from HF)"
+        tag = "  (in HF cache — instant symlink)" if st == "cached" else "  (will download from HF)"
         try:
             ans = input(f"  [Y/n] {p.label}{tag}: ").strip().lower()
         except (EOFError, KeyboardInterrupt):
@@ -485,32 +485,69 @@ def _ask_packs(missing: list[SA3Pack], installed: set[str], states: dict[str, st
 
 
 def _download_repo(repo_id: str, target_dir: Path) -> Path | None:
-    """Download a repo into target_dir under the dashboard's state tree.
+    """Download a HF repo into the standard $HF_HUB_CACHE and symlink
+    `target_dir` to the snapshot.
 
-    huggingface_hub.snapshot_download with local_dir=...  uses the HF cache as
-    a backing store: if the repo is already cached locally, the files land in
-    target_dir as symlinks pointing at the cache (no re-download). If a fresh
-    download is needed, it goes through the cache and is symlinked into
-    target_dir. So "already downloaded somewhere" (= in HF cache) is honored
-    for free.
+    Big checkpoints (8.6 GB SA3-medium etc.) live ONCE in
+    ~/.cache/huggingface/hub/, content-addressed. Each underfit clone has
+    its own state/models/<key>/{base,arc}/ which is a symlink into that
+    cache. Multiple clones share a single on-disk copy; cleaning a clone
+    doesn't waste the big download.
+
+    Compatibility paths:
+      - target_dir already a symlink → unlinked + relinked (refreshes sha if
+        the cache moved on).
+      - target_dir already a regular dir with the files (older installs
+        from before this change) → left alone, treated as already-staged.
+      - target_dir doesn't exist or is empty → create the symlink.
     """
+    import shutil
     from huggingface_hub import snapshot_download
-    target_dir.mkdir(parents=True, exist_ok=True)
-    if any(target_dir.iterdir()):
-        # Heuristic: if the model files we need are already present (e.g. from
-        # a prior run), skip the HF roundtrip. snapshot_download is cheap when
-        # nothing changed, but skipping eliminates a network call entirely.
-        if (target_dir / "model.safetensors").exists() and (target_dir / "model_config.json").exists():
-            print(f"  ⤷ already present at {target_dir}, skipping download")
-            return target_dir
-    print(f"\n→ downloading {repo_id} → {target_dir} ...", flush=True)
+
+    # ── Compatibility: legacy installs put the files DIRECTLY in target_dir
+    # (via the old snapshot_download(local_dir=...) path). Don't touch
+    # those — just confirm the canonical files are present.
+    if (not target_dir.is_symlink()
+            and target_dir.is_dir()
+            and (target_dir / "model.safetensors").exists()
+            and (target_dir / "model_config.json").exists()):
+        print(f"  ⤷ already present at {target_dir} (legacy direct copy, leaving alone)")
+        return target_dir
+
+    # If it's already a working symlink into the cache, verify the snapshot
+    # still exists; if so, no-op.
+    if target_dir.is_symlink():
+        resolved = target_dir.resolve()
+        if (resolved / "model.safetensors").exists() and (resolved / "model_config.json").exists():
+            print(f"  ⤷ already symlinked: {target_dir} → {resolved}")
+            return resolved
+        # Stale symlink — unlink and re-resolve.
+        target_dir.unlink()
+
+    print(f"\n→ fetching {repo_id} into HF cache ...", flush=True)
     try:
-        local = snapshot_download(repo_id=repo_id, local_dir=str(target_dir))
+        # No local_dir → files stay in $HF_HUB_CACHE/models--<org>--<repo>/
+        # snapshots/<sha>/, with content-addressed blobs/. Reused across
+        # any future call (and any other underfit clone) for free.
+        snapshot_path = Path(snapshot_download(repo_id=repo_id))
     except Exception as e:
         print(f"  ✗ {type(e).__name__}: {e}")
         return None
-    print(f"  ✓ ready at {local}")
-    return Path(local)
+
+    # Symlink target_dir to the snapshot.
+    target_dir.parent.mkdir(parents=True, exist_ok=True)
+    if target_dir.exists() or target_dir.is_symlink():
+        # Should only hit here if it was an empty dir created upstream.
+        if target_dir.is_dir() and not target_dir.is_symlink() and not any(target_dir.iterdir()):
+            target_dir.rmdir()
+        elif target_dir.is_symlink():
+            target_dir.unlink()
+        else:
+            print(f"  ✗ {target_dir} exists and is non-empty; refusing to clobber.")
+            return None
+    target_dir.symlink_to(snapshot_path)
+    print(f"  ✓ ready at {target_dir} → {snapshot_path}")
+    return snapshot_path
 
 
 def _pack_dir(p: SA3Pack) -> Path:

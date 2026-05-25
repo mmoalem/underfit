@@ -642,8 +642,22 @@ def run_model_phase(args, backend: Backend) -> int:
         print(f"⚠ {failures} download(s) failed; see messages above.")
         return 2
     print("\n✓ Setup complete.")
-    print(f"  Dashboard state dir: {state_dir()}")
-    print(f"  Launch the dashboard with UNDERFIT_STATE_DIR={state_dir()}")
+    # UNDERFIT_STATE_DIR is the *parent* directory (durable, often on Drive in
+    # Colab — holds runs/, datasets/, audio/, seed_loras/). Several subdirs can
+    # be overridden to local SSD for live performance, with async sync back to
+    # Drive. Print the active overrides so the user knows what's where.
+    print(f"  UNDERFIT_STATE_DIR     = {state_dir()}    (parent, durable)")
+    for env_var, default_suffix in (
+        ("UNDERFIT_LOGS_DIR",        "runs"),
+        ("UNDERFIT_STATE_FILES_DIR", ""),
+        ("UNDERFIT_MODELS_DIR",      "models"),
+        ("HF_HOME",                  ""),
+    ):
+        val = os.environ.get(env_var)
+        if val:
+            note = "(local SSD override)" if not val.startswith(str(state_dir())) else ""
+            print(f"  {env_var:<22s} = {val}    {note}")
+    print(f"\n  Re-launch the dashboard to pick up the current env.")
     return 0
 
 

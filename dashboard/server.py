@@ -2035,27 +2035,33 @@ class EncodingMonitor:
                             try:
                                 with open(details_path) as f:
                                     details = json.load(f)
-                                # 1 source audio file → 1 latent .npy (splitting is no
-                                # longer supported, so source count == latent count).
+                                # 1 source audio file → 1 latent .npy. Gate on num_files > 0:
+                                # encoder crashed mid-run still writes details.json sometimes,
+                                # so we need an actual-output check before saying "ready".
                                 num_files = sum(1 for _ in latent_dir.rglob("*.npy"))
-                                total = ds.get("encoding_progress", {}).get("total", num_files)
-                                self._registry.update_dataset(ds_id,
-                                    status="ready",
-                                    encoding_pid=None,
-                                    num_files=num_files,
-                                    latent_dim=details.get("latent_dim", 64),
-                                    sample_rate=details.get("sample_rate", 44100),
-                                    details=details,
-                                    encoding_progress={"encoded": num_files, "skipped": 0, "errors": 0, "total": total},
-                                )
-                                print(f"[encoding_monitor] Dataset '{ds_id}' completed: {num_files} files")
-                                # Regenerate GT if missing (normally already created at dataset creation)
-                                if not ds.get("ground_truth"):
-                                    _ds_files = ds.get("dataset_files", [])
-                                    if _ds_files:
-                                        gt_list, gt_prompts = _generate_dataset_ground_truth(_ds_files, ds.get("name", ds_id), model=ds.get("model", "sa3-medium"))
-                                        if gt_list:
-                                            self._registry.update_dataset(ds_id, ground_truth=gt_list, demo_prompts=gt_prompts)
+                                if num_files == 0:
+                                    self._registry.remove_dataset(ds_id)
+                                    print(f"[encoding_monitor] Dataset '{ds_id}' removed: "
+                                          f"encoding finished but produced 0 latents — check the encode log.")
+                                else:
+                                    total = ds.get("encoding_progress", {}).get("total", num_files)
+                                    self._registry.update_dataset(ds_id,
+                                        status="ready",
+                                        encoding_pid=None,
+                                        num_files=num_files,
+                                        latent_dim=details.get("latent_dim", 64),
+                                        sample_rate=details.get("sample_rate", 44100),
+                                        details=details,
+                                        encoding_progress={"encoded": num_files, "skipped": 0, "errors": 0, "total": total},
+                                    )
+                                    print(f"[encoding_monitor] Dataset '{ds_id}' completed: {num_files} files")
+                                    # Regenerate GT if missing (normally already created at dataset creation)
+                                    if not ds.get("ground_truth"):
+                                        _ds_files = ds.get("dataset_files", [])
+                                        if _ds_files:
+                                            gt_list, gt_prompts = _generate_dataset_ground_truth(_ds_files, ds.get("name", ds_id), model=ds.get("model", "sa3-medium"))
+                                            if gt_list:
+                                                self._registry.update_dataset(ds_id, ground_truth=gt_list, demo_prompts=gt_prompts)
                             except Exception as e:
                                 # Failed mid-encode → drop the record so the name slot is freed.
                                 self._registry.remove_dataset(ds_id)
@@ -2084,9 +2090,16 @@ def _validate_datasets_on_startup():
                 datasets_registry.update_dataset(ds["id"], status="error")
                 print(f"[startup] Dataset '{ds['id']}' latent dir missing — marked error")
             else:
-                # Re-count .npy files on disk and update num_files.
+                # Re-count .npy files on disk. A "ready" dataset with 0 files
+                # is a zombie (failed encode that got marked ready by old code) —
+                # mark it error so it's clearly broken and gets filtered out.
                 num_files = sum(1 for _ in latent_dir.rglob("*.npy"))
-                if num_files != ds.get("num_files", 0):
+                if num_files == 0:
+                    datasets_registry.update_dataset(ds["id"], status="error",
+                                                     num_files=0,
+                                                     error="encoding produced 0 latents")
+                    print(f"[startup] Dataset '{ds['id']}' has 0 .npy files — marked error")
+                elif num_files != ds.get("num_files", 0):
                     datasets_registry.update_dataset(ds["id"], num_files=num_files)
         elif ds["status"] == "encoding":
             # Check if encoding PID is still alive
@@ -2096,8 +2109,14 @@ def _validate_datasets_on_startup():
                 details_path = latent_dir / "details.json"
                 if details_path.exists():
                     num_files = sum(1 for _ in latent_dir.rglob("*.npy"))
-                    datasets_registry.update_dataset(ds["id"], status="ready", encoding_pid=None, num_files=num_files)
-                    print(f"[startup] Dataset '{ds['id']}' encoding finished (PID dead, details exists)")
+                    if num_files == 0:
+                        datasets_registry.update_dataset(ds["id"], status="error",
+                                                         encoding_pid=None, num_files=0,
+                                                         error="encoding produced 0 latents")
+                        print(f"[startup] Dataset '{ds['id']}' encoding crashed (0 latents) — marked error")
+                    else:
+                        datasets_registry.update_dataset(ds["id"], status="ready", encoding_pid=None, num_files=num_files)
+                        print(f"[startup] Dataset '{ds['id']}' encoding finished (PID dead, details exists, {num_files} files)")
                 else:
                     datasets_registry.update_dataset(ds["id"], status="error", encoding_pid=None)
                     print(f"[startup] Dataset '{ds['id']}' encoding PID dead — marked error")

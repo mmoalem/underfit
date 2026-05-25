@@ -5769,7 +5769,13 @@ window.filterNewFtDatasets = function() {
   const compatibleModels = myCompat.length
     ? Object.entries(_remoteModels).filter(([_, m]) => myCompat.includes(m.encoder_id)).map(([k]) => k)
     : [model];
-  const compatible = _newFtAllDatasets.filter(d => compatibleModels.includes(d.model));
+  // Only show datasets that are actually usable — ready status AND have >0 files.
+  // Excludes encoding-in-progress, error'd, and any zombie 0-file records.
+  const compatible = _newFtAllDatasets.filter(d =>
+    compatibleModels.includes(d.model)
+    && d.status === 'ready'
+    && (d.num_files || d.num_chunks || 0) > 0
+  );
   // Check if the dataset list actually changed — if not, preserve selection
   const currentIds = Array.from(dsSel.options).map(o => o.value);
   const newIds = compatible.map(d => d.id);

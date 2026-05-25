@@ -1953,11 +1953,17 @@ class TrainingMonitor:
                     backend_env = _backend_env_for_model(fresh_run.get("base_model"))
                     demo_dir = fresh_run.get("demo_source_dir", str(RUNS_DIR))
                     os.makedirs(demo_dir, exist_ok=True)
-                    launch_cmd = f"source {VENV_ACTIVATE} && cd {shlex.quote(demo_dir)} && PYTHONUNBUFFERED=1 {backend_env}{gpu_env}{restart_cmd} 2>&1 | python3 -u -m underfit.utils.stderr_filter | tee -a {shlex.quote(log_path)}"
+                    log_env = f"UNDERFIT_LOG_PATH={shlex.quote(log_path)} "
+                    bash_err_path = log_path + ".bash.err"
+                    try:
+                        bash_err_f = open(bash_err_path, "wb")
+                    except OSError:
+                        bash_err_f = subprocess.DEVNULL
+                    launch_cmd = f"source {VENV_ACTIVATE} && cd {shlex.quote(demo_dir)} && PYTHONUNBUFFERED=1 {log_env}{backend_env}{gpu_env}{restart_cmd} 2>&1 | python3 -u -m underfit.utils.stderr_filter | tee -a {shlex.quote(log_path)}"
                     proc = subprocess.Popen(
                         ["bash", "-c", launch_cmd],
                         stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
+                        stderr=bash_err_f,
                         preexec_fn=os.setsid,
                     )
                     self._registry.update_run(run_id, pid=proc.pid)
@@ -3802,12 +3808,18 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         backend_env = _backend_env_for_model(run.get("base_model"))
         demo_dir = run.get("demo_source_dir", str(RUNS_DIR))
         os.makedirs(demo_dir, exist_ok=True)
-        launch_cmd = f"source {VENV_ACTIVATE} && cd {shlex.quote(demo_dir)} && PYTHONUNBUFFERED=1 {backend_env}{gpu_env}{new_cmd} 2>&1 | python3 -u -m underfit.utils.stderr_filter | tee {shlex.quote(str(new_log))}"
+        log_env = f"UNDERFIT_LOG_PATH={shlex.quote(str(new_log))} "
+        bash_err_path = str(new_log) + ".bash.err"
+        try:
+            bash_err_f = open(bash_err_path, "wb")
+        except OSError:
+            bash_err_f = subprocess.DEVNULL
+        launch_cmd = f"source {VENV_ACTIVATE} && cd {shlex.quote(demo_dir)} && PYTHONUNBUFFERED=1 {log_env}{backend_env}{gpu_env}{new_cmd} 2>&1 | python3 -u -m underfit.utils.stderr_filter | tee {shlex.quote(str(new_log))}"
         try:
             proc = subprocess.Popen(
                 ["bash", "-c", launch_cmd],
                 stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stderr=bash_err_f,
                 preexec_fn=os.setsid,
             )
         except Exception as e:

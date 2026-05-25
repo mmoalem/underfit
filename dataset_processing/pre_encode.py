@@ -611,11 +611,13 @@ def main():
     # --- Read config (no model instantiation yet) -----------------------------
 
     model_dir   = MODEL_PATHS.get(model_name, _MODELS_DIR / model_name)
-    # Resolve symlinks so downstream loaders that dispatch on file extension
-    # (e.g. stable_audio_tools.models.utils.load_ckpt_state_dict, which
-    # branches on .safetensors vs .pt) see the real target's name.
-    config_path = (model_dir / "config").resolve()
-    ckpt_path   = (model_dir / "ckpt").resolve()
+    # Use the proper-named files directly under base/. The 'config' / 'ckpt'
+    # flat-symlinks in model_dir/ go through one extra hop (to base/...), and
+    # calling .resolve() on either now walks all the way to the HF cache's
+    # content-addressed blob (no extension!) which breaks load_ckpt_state_dict's
+    # if-endswith-.safetensors branch.
+    config_path = model_dir / "base" / "model_config.json"
+    ckpt_path   = model_dir / "base" / "model.safetensors"
 
     with open(config_path) as f:
         config = json.load(f)

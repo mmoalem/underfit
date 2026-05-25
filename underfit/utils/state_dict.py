@@ -22,9 +22,29 @@ def copy_state_dict(model, state_dict):
 
 
 def load_ckpt_state_dict(ckpt_path):
-    if ckpt_path.endswith(".safetensors"):
-        return load_file(ckpt_path)
-    return torch.load(ckpt_path, map_location="cpu", weights_only=True)["state_dict"]
+    """Load a checkpoint's state_dict. Handles three input shapes:
+      - path ending in .safetensors  → safetensors.torch.load_file
+      - path ending in .pt/.ckpt/.bin → torch.load (weights_only)
+      - extensionless path (HF cache blob, etc.) → peek at the file header
+        to detect format.
+
+    The HF-cache fallback exists because content-addressed blobs in
+    ~/.cache/huggingface/hub/<repo>/blobs/<hash> have no extension; without
+    sniffing, a safetensors blob would get fed to torch.load and explode.
+    """
+    path = str(ckpt_path)
+    if path.endswith(".safetensors"):
+        return load_file(path)
+    if path.endswith((".pt", ".ckpt", ".bin")):
+        return torch.load(path, map_location="cpu", weights_only=True)["state_dict"]
+    # Unknown extension — sniff first bytes. safetensors layout: 8-byte
+    # little-endian header length, then JSON ('{...}'). torch.save uses
+    # pickle (\x80) or zip (PK).
+    with open(path, "rb") as f:
+        head = f.read(16)
+    if len(head) >= 9 and head[8:9] == b"{":
+        return load_file(path)
+    return torch.load(path, map_location="cpu", weights_only=True)["state_dict"]
 
 
 def stream_checkpoint_into_model(model, ckpt_path, *, device, dtype=None,

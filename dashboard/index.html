@@ -5358,33 +5358,10 @@ window._warnUnregisteredModel = function(modelKey) {
   const meta = _remoteModels[modelKey] || {};
   if (meta.registered !== false) return;
   const label = _escAttr(meta.label || modelKey);
-  // Title: download-arrow icon in an orange-tinted circle + heading text.
-  // Body: pill-styled model name, then a callout block with the install
-  // command in a left-bordered card.
-  const titleHtml =
-    `<span style="display:inline-flex;align-items:center;gap:10px;justify-content:center">`
-    + `<span style="display:inline-flex;align-items:center;justify-content:center;`
-    +   `width:30px;height:30px;border-radius:50%;background:rgba(249,115,22,0.15);color:var(--orange)">`
-    +   `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" `
-    +     `stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">`
-    +     `<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>`
-    +     `<polyline points="7 10 12 15 17 10"/>`
-    +     `<line x1="12" y1="15" x2="12" y2="3"/>`
-    +   `</svg>`
-    + `</span>`
-    + `Base model not downloaded`
-    + `</span>`;
   const bodyHtml =
-    `<div style="margin-bottom:14px;color:var(--text)">`
-    +   `<code style="color:var(--accent2);background:var(--bg3);padding:3px 8px;`
-    +     `border-radius:5px;font-size:0.95em;font-weight:500">${label}</code>`
-    +   ` isn’t available on this machine yet.`
-    + `</div>`
-    + `<div style="padding:10px 14px;background:var(--bg3);border-radius:6px;`
-    +     `border-left:3px solid var(--orange);color:var(--text);font-size:0.92em">`
-    +   `Please run the installer again to download it.`
-    + `</div>`;
-  _showSeedDialog(titleHtml, bodyHtml, [{label: 'OK', primary: true}]);
+    `<span style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--accent2)">${label}</span>`
+    + ` isn’t downloaded on this machine. Please run the installer again.`;
+  _showSeedDialog('Base model not downloaded', bodyHtml, [{label: 'OK', primary: true}]);
 };
 
 // Open the file picker for the seed-LoRA upload. Always clear the input's

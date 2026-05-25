@@ -3924,9 +3924,15 @@ function _renderStatus(status, refreshRunId) {
         _setLogContent(logContentEl, status.log_tail);
         if (wasAtBottom) lc.scrollTop = lc.scrollHeight;
       }
-    } else {
+    } else if (!logContentEl.innerHTML) {
+      // No log yet (e.g. brand-new run that hasn't written anything) — keep
+      // the section hidden so the page doesn't have a confusing empty panel.
       logSection.style.display = 'none';
     }
+    // ELSE: status.log_tail is empty BUT we already have content from a prior
+    // poll. This typically means the run just got auto-restarted and the new
+    // log file is briefly empty. Keep the section visible with the old
+    // content — the /api/log_tail poller will refresh it within ~1s.
 
 }
 

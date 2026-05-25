@@ -3526,8 +3526,12 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                     )
                     return
                 cfg["training"]["lora_ckpt_path"] = str(run_seed_dst)
-                # Intentionally do NOT set step_offset — the new run starts at
-                # step 0 with the seed's weights as initialization.
+                # Explicitly zero the step/epoch counters. Without these, the
+                # training loop's _resolve_offsets falls through to the seed
+                # safetensors' metadata (e.g. step=15000) — which is wrong for
+                # a fresh run that just initializes from those weights.
+                cfg["training"]["step_offset"] = 0
+                cfg["training"]["epoch_offset"] = 0
             if mi.get("svd_bases"):
                 cfg["svd_bases_path"] = mi["svd_bases"]
             if base_precision:

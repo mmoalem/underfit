@@ -90,14 +90,21 @@ def _resolve_offsets(args, model_config, resume_metadata, steps_per_epoch=None):
     """Recover (step_offset, epoch_offset) for a resume.
 
     Resolution order, per requirement:
-      1. training_cfg.step_offset / training_cfg.epoch_offset (explicit override)
+      1. training_cfg.step_offset / training_cfg.epoch_offset (explicit override) —
+         respected even when the value is 0 (used by the "seed from a previous
+         LoRA" workflow, which wants the new run to start at step 0/epoch 0
+         regardless of whatever step is baked into the seed safetensors).
       2. safetensors metadata (resume_metadata dict from load_lora_checkpoint)
       3. step= / epoch= tokens parsed from the resume filename
       4. step // steps_per_epoch as a last-resort estimate for epoch
     """
     training_cfg = model_config.get("training", {})
-    cfg_step = int(training_cfg.get("step_offset", 0) or 0)
-    cfg_epoch = int(training_cfg.get("epoch_offset", 0) or 0)
+    # Explicit override path — `step_offset` / `epoch_offset` keys PRESENT
+    # in the config (even with value 0) take precedence over metadata.
+    has_cfg_step = "step_offset" in training_cfg
+    has_cfg_epoch = "epoch_offset" in training_cfg
+    cfg_step = int(training_cfg.get("step_offset", 0) or 0) if has_cfg_step else None
+    cfg_epoch = int(training_cfg.get("epoch_offset", 0) or 0) if has_cfg_epoch else None
 
     lora_path = _resolve_resume_path(args, training_cfg)
 
@@ -118,13 +125,19 @@ def _resolve_offsets(args, model_config, resume_metadata, steps_per_epoch=None):
     if lora_path:
         file_step, file_epoch = _parse_filename_offsets(lora_path)
 
-    step_offset = cfg_step or meta_step or file_step or 0
-    epoch_offset = cfg_epoch or meta_epoch or file_epoch
-    if epoch_offset is None:
-        if step_offset and steps_per_epoch:
-            epoch_offset = step_offset // steps_per_epoch
-        else:
-            epoch_offset = 0
+    if cfg_step is not None:
+        step_offset = cfg_step
+    else:
+        step_offset = meta_step or file_step or 0
+    if cfg_epoch is not None:
+        epoch_offset = cfg_epoch
+    else:
+        epoch_offset = meta_epoch or file_epoch
+        if epoch_offset is None:
+            if step_offset and steps_per_epoch:
+                epoch_offset = step_offset // steps_per_epoch
+            else:
+                epoch_offset = 0
     return step_offset, epoch_offset
 
 

@@ -392,11 +392,74 @@ def _models_dir() -> Path:
 
 
 def staged_pack_keys() -> set[str]:
-    """Set of SA3 pack keys with downloaded model files on disk."""
+    """Set of SA3 pack keys with ALL required files present.
+
+    Strict check — every pack needs base ckpt + base config + ARC ckpt +
+    ARC config. Previously this only looked for base/model.safetensors,
+    which let a partially-failed install (e.g. base downloaded, ARC
+    blocked by an unaccepted HF license) appear "fully staged" on the
+    next ./install.sh run — the wizard would say "nothing to do" and the
+    user would be stuck with an unusable install.
+    """
     d = _models_dir()
     if not d.is_dir():
         return set()
-    return {p.parent.parent.name for p in d.glob("*/base/model.safetensors") if p.is_file()}
+    required = ("base/model.safetensors", "base/model_config.json",
+                "arc/model.safetensors",  "arc/model_config.json")
+    ok = set()
+    for pack_dir in d.iterdir():
+        if not pack_dir.is_dir():
+            continue
+        if all((pack_dir / r).exists() for r in required):
+            ok.add(pack_dir.name)
+    return ok
+
+
+def _print_license_help() -> None:
+    """Big visible block telling the user how to accept the SA3 ARC license."""
+    print()
+    print("━" * 78)
+    print(" ⚠️   Stable Audio 3 ARC models require accepting an HF license")
+    print("━" * 78)
+    print()
+    print("  The ARC checkpoints (the inference-fast distilled models) are")
+    print("  gated on HuggingFace. Approval is instant once you click")
+    print("  Agree, and ONE click unlocks all three SA3 ARC repos at once.")
+    print()
+    print("    👉  https://huggingface.co/stabilityai/stable-audio-3-medium")
+    print()
+    print("  After clicking 'Agree and access repository' on that page,")
+    print("  re-run ./install.sh and the wizard will resume where it left off.")
+    print()
+    print("  (The BASE models are not gated; if those already downloaded,")
+    print("   the rerun will skip them and only fetch the ARC files.)")
+    print()
+    print("━" * 78)
+    print()
+
+
+def _check_arc_access(repo_id: str) -> tuple[bool, str | None]:
+    """Probe one ARC repo for read access without downloading.
+
+    Returns (ok, reason). ok=False means we're blocked by the gated-repo
+    license (most common) or by a network/auth issue (rarer); the caller
+    surfaces the license-help block either way since that's the only
+    fixable scenario from the user's side.
+    """
+    try:
+        from huggingface_hub import HfApi
+    except ImportError:
+        return True, None  # no hub → defer to actual download attempt
+    try:
+        HfApi().model_info(repo_id)
+        return True, None
+    except Exception as e:
+        name = type(e).__name__
+        msg = str(e).splitlines()[0][:200]
+        if "GatedRepoError" in name or "403" in msg or "Cannot access gated repo" in msg:
+            return False, f"{name}: {msg}"
+        # Anything else — let the real download attempt try.
+        return True, None
 
 
 def _pack_in_hf_cache(pack: SA3Pack) -> bool:
@@ -510,6 +573,13 @@ def _download_repo(repo_id: str, target_dir: Path) -> Path | None:
         # any future call (and any other underfit clone) for free.
         snapshot_path = Path(snapshot_download(repo_id=repo_id))
     except Exception as e:
+        # Re-raise gated-repo errors so the orchestrator can show the
+        # license-help block and abort the whole install — there's no
+        # point continuing to the next pack since the same ARC license
+        # gates all of them.
+        if (type(e).__name__ == "GatedRepoError"
+                or "Cannot access gated repo" in str(e)):
+            raise
         print(f"  ✗ {type(e).__name__}: {e}")
         return None
 
@@ -680,10 +750,49 @@ def run_model_phase(args, backend: Backend) -> int:
         print("\n✗ no packs selected and none are staged — at least one is required.")
         return 1
 
+    # ── Up-front heads-up on the gated ARC license ─
+    # Show this BEFORE we kick off any downloads so the user has the URL
+    # in front of them while the first base model is fetching. If they
+    # haven't accepted yet, the preflight below catches it and aborts
+    # before we waste bandwidth.
+    print()
+    print("┌─ Heads-up ──────────────────────────────────────────────────────────────┐")
+    print("│ The ARC checkpoints are gated by an HF license. ONE click on any of     │")
+    print("│ the three SA3 ARC repos approves all three. If you haven't done this,   │")
+    print("│ accept now:                                                             │")
+    print("│   https://huggingface.co/stabilityai/stable-audio-3-medium              │")
+    print("└─────────────────────────────────────────────────────────────────────────┘")
+
+    # ── Preflight: probe ONE ARC repo before the first 10 GB base download.
+    # Catches the most common install failure (gated-repo license not
+    # accepted) in <1 s instead of after a 10-minute base download.
+    print(f"\n→ verifying HuggingFace access to ARC repo {selected[0].arc_repo} …",
+          flush=True)
+    ok, reason = _check_arc_access(selected[0].arc_repo)
+    if not ok:
+        print(f"  ✗ blocked: {reason}")
+        _print_license_help()
+        return 1
+    print("  ✓ ARC access OK")
+
     failures = 0
-    for p in selected:
-        if not install_pack(p):
-            failures += 1
+    try:
+        for p in selected:
+            if not install_pack(p):
+                failures += 1
+    except Exception as e:
+        # Most likely a GatedRepoError that slipped past the preflight
+        # (e.g. user accepted only one of two repo families, future
+        # license changes, transient HF outage). Either way, abandon the
+        # rest of the install — the same license gates every ARC repo so
+        # continuing is futile — and show the help block.
+        if (type(e).__name__ == "GatedRepoError"
+                or "Cannot access gated repo" in str(e)):
+            print(f"\n  ✗ blocked: {type(e).__name__}: "
+                  f"{str(e).splitlines()[0][:200]}")
+            _print_license_help()
+            return 1
+        raise
 
     after = staged_pack_keys()
     print()

@@ -75,7 +75,7 @@ required-version = ">=0.5"
 
 [tool.hatch.build.targets.wheel]
 # Only ship the `underfit/` package — not dashboard/, dataset_processing/,
-# colab.ipynb, etc. Those are run-from-clone-only artifacts.
+# underfit-colab.ipynb, etc. Those are run-from-clone-only artifacts.
 packages = ["underfit"]
 
 [project.scripts]

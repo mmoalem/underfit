@@ -256,13 +256,6 @@ Zero install on your machine. Free GPU access for experimenting. Free tier is sl
 
 **Use ngrok in Step 4.** Colab's built-in port-proxy buffers HTTP responses aggressively, which makes the dashboard feel laggy and occasionally freeze. Audio playback is the worst offender — the proxy holds the entire audio file before forwarding to your browser instead of streaming it, blocking every other request until done. *Training itself is unaffected* — it runs as a detached subprocess on the GPU and survives dashboard freezes or closed tabs. Free signup at [ngrok.com](https://ngrok.com) and paste your auth token into the `NGROK_AUTHTOKEN` field in Step 4. If anything ever freezes, re-run Step 4 to restart the server. Colab is nice, but using a normal Linux box is the most reliable setup. 
 
-### Tier recommendations
-
-| Tier | Notes |
-|---|---|
-| **H100** (Pro) | Best. Training is fast, demos finish in seconds, dashboard responsive. ~$9.99 of compute credits per session. |
-| **L4 / A100 / G4** | Comfortable. |
-| **T4** (Free) | Slow but works. Use **SA3-small** (medium can work but it's slow), **latent length ≤128**, **batch_size 1**, and the **Two-demo preset**. |
 
 ### Colab troubleshooting
 

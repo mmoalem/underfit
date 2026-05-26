@@ -71,14 +71,12 @@ If you want a specific subset of model packs without the interactive wizard:
 
 ## Adapter formats
 
-| Format        | When |
-|---            |---|
-| **DoRA**      | **Recommended default.** Generally better-quality fits than vanilla LoRA. |
-| **LoRA**      | The original. Fast and well-understood. |
-| **BoRA**      | Block-structured variant. |
-| **DoRA-XS**   | "Extra-small" DoRA. Smaller files, slightly less capacity. |
-| **LoRA-XS**   | Same idea, plain-LoRA flavor. |
-| **BoRA-XS**   | Same idea, block-structured flavor. |
+| Format        | What it adds | When |
+|---            |---|---|
+| **LoRA**      | `lora_A`, `lora_B` | The original low-rank adapter. Fast, well-understood. |
+| **DoRA**      | LoRA + a per-column magnitude vector | **Recommended default.** Generally better-quality fits than vanilla LoRA. |
+| **BoRA**      | LoRA + per-row *and* per-column magnitudes | Like DoRA but scales in both dimensions. |
+| **LoRA-XS / DoRA-XS / BoRA-XS** | Same as above, but the rank-`r` matrices are factored against fixed SVD bases instead of being free parameters | "Extra-small" variants. Smaller files, slightly less capacity. |
 
 Pick one in the **LoRA type** dropdown of *New Finetune*. All variants produce a single `.safetensors` file you can load anywhere.
 

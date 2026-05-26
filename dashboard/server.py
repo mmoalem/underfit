@@ -4389,6 +4389,34 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self.wfile.write(b"\r\n")
             self.wfile.flush()
 
+        # ── Defeat proxy-side response buffering ──────────────────────
+        # Some proxies (Colab's googleusercontent / colab.dev port-proxy,
+        # Cloud Run front-ends, default-config nginx) hold a streaming
+        # response in their accumulation buffer until N kilobytes have
+        # arrived from the origin. Symptom: the browser sees the request
+        # stuck at "(pending)" forever because the first real SSE event
+        # is only a few hundred bytes — never crosses the proxy's flush
+        # threshold. Two-prong fix:
+        #
+        #   1. Big initial padding chunk so the proxy flushes immediately
+        #      (the browser starts receiving bytes within ms instead of
+        #      whenever our payload happens to cross the threshold).
+        #   2. Per-event padding so every subsequent chunk is also above
+        #      the typical proxy threshold (~2 KB).
+        #
+        # The padding is a `:`-prefixed SSE "comment" line — EventSource
+        # parsers (browser-native + every library I've seen) ignore it,
+        # so it's invisible to the consumer.
+        _chunk(b": " + b"x" * 8192 + b"\n\n")
+
+        def _pad(body: bytes, min_size: int = 2048) -> bytes:
+            if len(body) >= min_size:
+                return body
+            pad = min_size - len(body) - 3   # leave room for ": ", "\n"
+            if pad <= 0:
+                return body
+            return b": " + b"x" * pad + b"\n" + body
+
         # Initial state pointers — caller can pass these in via query string
         # after a reconnect to skip already-seen content.
         log_size  = int(params.get("log_size",  [0])[0])
@@ -4592,11 +4620,11 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                         f"id: {seq}\n"
                         f"data: {json.dumps(payload, default=str)}\n\n"
                     )
-                    _chunk(line.encode())
+                    _chunk(_pad(line.encode()))
                 else:
                     # heartbeat — comment line, ignored by EventSource,
                     # keeps the connection alive through idle proxies
-                    _chunk(b": ping\n\n")
+                    _chunk(_pad(b": ping\n\n"))
 
                 time.sleep(1)
         except (BrokenPipeError, ConnectionResetError, OSError):

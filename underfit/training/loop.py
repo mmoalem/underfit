@@ -446,7 +446,13 @@ def run_training(args, backend):
     pretransform_scale = getattr(model.pretransform, "scale", 1.0) if model.pretransform is not None else 1.0
     downsampling_ratio = model.pretransform.downsampling_ratio if model.pretransform is not None else 1
 
-    max_steps = int(args.max_steps) if args.max_steps else 10**9
+    # max_steps from the CLI is the *absolute* global-step target. The
+    # dashboard's resume validator + restart_cmd builder both rely on this
+    # semantics (server.py:4052 + comment at server.py:4127). On a fresh
+    # run step_offset is 0 so it's a no-op; on a resume from global step
+    # N we only need (max_steps - N) new in-process steps.
+    max_steps_abs = int(args.max_steps) if args.max_steps else 10**9
+    max_steps = max(0, max_steps_abs - step_offset)
     save_every = int(args.checkpoint_every) if args.checkpoint_every else 1000
     demo_config = training_config.get("demo", {}) or {}
     demo_every = int(demo_config.get("demo_every", 0))
@@ -454,7 +460,17 @@ def run_training(args, backend):
     raw_step = 0
     epoch = epoch_offset
 
-    print(f"Training for up to {max_steps} steps; save every {save_every}", flush=True)
+    print(
+        f"Training to global step {max_steps_abs} ({max_steps} new steps "
+        f"from step_offset={step_offset}); save every {save_every}",
+        flush=True,
+    )
+    if max_steps == 0:
+        print(
+            f"step_offset ({step_offset}) is already at or past max_steps "
+            f"({max_steps_abs}); nothing to train.",
+            flush=True,
+        )
 
     try:
         # Baseline demo at step 0 (fresh runs only). Captures the model output
@@ -675,9 +691,14 @@ def run_training(args, backend):
                     break
             epoch += 1
 
-        # Final save (skip if the last regular save already covered this step).
+        # Final save (skip if the last regular save already covered this
+        # step, OR if no new steps were trained this process — covers the
+        # "resume past max_steps" no-op case).
         global_step = raw_step + step_offset
-        if checkpoint_dir and global_step > 0 and global_step % save_every != 0:
+        if (checkpoint_dir
+                and raw_step > 0
+                and global_step > 0
+                and global_step % save_every != 0):
             out = os.path.join(checkpoint_dir, _ckpt_filename(run_label, global_step, epoch))
             save_lora_step(backend, model, saved_lora_cfg, out, step=global_step, epoch=epoch, base_model=base_model_name)
             print(f"✓ Saved checkpoint -- {os.path.basename(out)} (final)", flush=True)

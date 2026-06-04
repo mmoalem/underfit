@@ -20,7 +20,21 @@ NAME = "sa3"
 # importable. Defaults to a sibling clone next to underfit (where
 # `underfit-setup --backend sa3` clones to). Users with the package
 # installed in the venv get hit by the importlib check below and skip this.
+_APP_ROOT = Path(__file__).resolve().parent.parent.parent
 _SA3_LOCAL = str(Path(__file__).resolve().parent.parent.parent.parent / "stable-audio-3")
+
+
+def _resolve_app_relative_path(value):
+    if not value:
+        return value
+    p = Path(value)
+    if p.is_absolute():
+        return str(p)
+    cwd_path = Path.cwd() / p
+    app_path = _APP_ROOT / p
+    if cwd_path.exists() and not app_path.exists():
+        return str(cwd_path)
+    return str(app_path)
 
 
 def _require_sa3():
@@ -262,10 +276,10 @@ def create_dataloader(dataset_config, batch_size, sample_size, sample_rate,
             cmf = _load_custom_metadata_fn(ds.get("custom_metadata_module"))
             configs.append(LatentDatasetConfig(
                 id=ds["id"],
-                path=ds["path"],
+                path=_resolve_app_relative_path(ds["path"]),
                 custom_metadata_fn=cmf,
                 weight=ds.get("weight", 1.0),
-                filelist_path=ds.get("filelist_path"),
+                filelist_path=_resolve_app_relative_path(ds.get("filelist_path")),
             ))
         ds = PreEncodedDataset(
             configs,
@@ -283,10 +297,10 @@ def create_dataloader(dataset_config, batch_size, sample_size, sample_rate,
             cmf = _load_custom_metadata_fn(ds.get("custom_metadata_module"))
             configs.append(LocalDatasetConfig(
                 id=ds["id"],
-                path=ds["path"],
+                path=_resolve_app_relative_path(ds["path"]),
                 custom_metadata_fn=cmf,
                 keywords=ds.get("keywords"),
-                filelist_path=ds.get("filelist_path"),
+                filelist_path=_resolve_app_relative_path(ds.get("filelist_path")),
                 weight=ds.get("weight", 1.0),
             ))
         ds = SampleDataset(
@@ -355,6 +369,7 @@ def create_dataloader(dataset_config, batch_size, sample_size, sample_rate,
 def _load_custom_metadata_fn(module_path):
     if module_path is None:
         return None
+    module_path = _resolve_app_relative_path(module_path)
     import importlib.util
     spec = importlib.util.spec_from_file_location("metadata_module", module_path)
     mod = importlib.util.module_from_spec(spec)

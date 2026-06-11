@@ -429,7 +429,11 @@ def run_training(args, backend):
     def _request_save(*_):
         manual_save_requested[0] = True
         print("\n[SIGUSR1] Checkpoint save requested — will save after current step", flush=True)
-    signal.signal(signal.SIGUSR1, _request_save)
+    sigusr1 = getattr(signal, "SIGUSR1", None)
+    if sigusr1 is not None:
+        signal.signal(sigusr1, _request_save)
+    else:
+        print("[startup] SIGUSR1 unavailable; manual checkpoint signal disabled", flush=True)
 
     # --- Training loop ---
     diffusion_objective = model.diffusion_objective

@@ -1874,6 +1874,7 @@ const _nanRunIds = new Set();  // runs that have NaN'd out
 let _trackAbort = null;
 let _isDragging = false;
 let gradioInstances = [];
+let _currentCheckpointsPayload = null;
 let _gpuModalCkptPath = null;
 let _gpuModalCkptName = null;
 let _selectedGpu = null;
@@ -4011,6 +4012,7 @@ function _renderStatus(status, refreshRunId) {
 
 function _renderCheckpoints(data, refreshRunId) {
     if (currentRunId !== refreshRunId) return;
+    _currentCheckpointsPayload = data;
     const checkpoints = data.checkpoints || [];
     _currentCheckpoints = checkpoints;
     const ckptEvery = data.checkpoint_every || (_currentStatus && _currentStatus.hyperparams ? _currentStatus.hyperparams.checkpoint_every : null);
@@ -7926,14 +7928,16 @@ function _streamConnect() {
         _renderLbtChart();
       }
     }
+    if (d.gradio) {
+      gradioInstances = d.gradio;
+    }
     if (d.checkpoints) {
       _renderCheckpoints(d.checkpoints, currentRunId);
+    } else if (d.gradio && _currentCheckpointsPayload) {
+      _renderCheckpoints(_currentCheckpointsPayload, currentRunId);
     }
     if (d.demos) {
       _renderDemos(d.demos, currentRunId);
-    }
-    if (d.gradio) {
-      gradioInstances = d.gradio;
     }
   };
   _streamSource.onerror = (_e) => {

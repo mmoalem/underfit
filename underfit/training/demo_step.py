@@ -27,6 +27,20 @@ from tqdm import tqdm
 from underfit.utils import compute_per_elem_trim, trim_and_concat
 
 
+_APP_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+
+
+def _resolve_app_relative_path(value):
+    if not value:
+        return value
+    if os.path.isabs(value):
+        return value
+    cwd_path = os.path.abspath(value)
+    app_path = os.path.abspath(os.path.join(_APP_ROOT, value))
+    if os.path.exists(cwd_path) and not os.path.exists(app_path):
+        return cwd_path
+    return app_path
+
 
 
 def _get_demo_latent_length(model, sample_size, latent_crop_length=None):
@@ -439,9 +453,9 @@ def run_demo_step(model, backend, demo_config, step, sample_size, sample_rate, d
     demo_cfg_scales = demo_config.get("demo_cfg_scales", [7])
     demo_steps = demo_config.get("demo_steps", 50)
     latent_crop_length = demo_config.get("latent_crop_length")
-    arc_lora_path = demo_config.get("arc_lora_path")
-    arc_full_model_path = demo_config.get("arc_full_model_path")
-    arc_full_model_config = demo_config.get("arc_full_model_config")
+    arc_lora_path = _resolve_app_relative_path(demo_config.get("arc_lora_path"))
+    arc_full_model_path = _resolve_app_relative_path(demo_config.get("arc_full_model_path"))
+    arc_full_model_config = _resolve_app_relative_path(demo_config.get("arc_full_model_config"))
     default_cfg = demo_cfg_scales[0] if demo_cfg_scales else 7
 
     default_dur_latents = _get_demo_latent_length(model, sample_size, latent_crop_length)

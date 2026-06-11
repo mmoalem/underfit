@@ -4093,7 +4093,8 @@ function _renderCheckpoints(data, refreshRunId) {
         const dsTag = c.dataset_name ? `<span class="ckpt-ds" title="${c.dataset_name}">${c.dataset_name}</span>` : '';
         const dlUrl = `/api/download?path=${encodeURIComponent(c.path)}`;
         const displayName = c.name.replace(/\.(safetensors|ckpt)$/, '');
-        return `<div class="ckpt-row" data-ckpt-path="${c.path}"><span class="ckpt-info">${mtime}${sessionTag}<span class="ckpt-name">${displayName}</span><a href="${dlUrl}" class="ckpt-dl" title="Download checkpoint">${c.size_mb} MB ⬇</a>${dsTag}</span><span class="ckpt-actions">${gradioHtml}</span></div>`;
+        const dlBtn = `<a href="${dlUrl}" class="gradio-btn launch" style="padding-left:6px;padding-right:6px;min-width:30px" title="Download LoRA (${c.size_mb} MB)">⬇</a>`;
+        return `<div class="ckpt-row" data-ckpt-path="${c.path}"><span class="ckpt-info">${mtime}${sessionTag}<span class="ckpt-name">${displayName}</span><span class="ckpt-size">${c.size_mb} MB</span>${dlBtn}${dsTag}</span><span class="ckpt-actions">${gradioHtml}</span></div>`;
       }
 
       // Split into pinned (active Gradio) and rest

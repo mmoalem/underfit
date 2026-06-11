@@ -33,10 +33,18 @@ BASE_DIR = Path(__file__).parent.parent
 DASHBOARD_DIR = Path(__file__).parent
 
 # Writable user state — runs.json/datasets.json, per-run outputs, generated
-# audio, checkpoint symlinks, gradio logs. Defaults to <repo>/state/ for a
-# clean separation from the code in dashboard/. Override with UNDERFIT_STATE_DIR
-# to relocate (e.g. ~/.underfit, persistent volume in Colab).
-STATE_DIR = Path(os.environ.get("UNDERFIT_STATE_DIR", BASE_DIR / "state")).expanduser()
+# audio, checkpoint symlinks, gradio logs.
+# Discovery order: UNDERFIT_STATE_DIR env > cwd if it already holds runs.json
+# (so `cd dashboard && server.py` Just Works) > <repo>/state/ default.
+def _resolve_state_dir():
+    env = os.environ.get("UNDERFIT_STATE_DIR")
+    if env:
+        return Path(env).expanduser()
+    cwd = Path.cwd()
+    if (cwd / "runs.json").is_file():
+        return cwd
+    return BASE_DIR / "state"
+STATE_DIR = _resolve_state_dir()
 STATE_DIR.mkdir(parents=True, exist_ok=True)
 
 # Tracked, ship-with-the-repo paths
@@ -7178,13 +7186,16 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         if not run_audio_dir.exists():
             return result
 
-        # Use cached step data — steps are append-only, only scan new dirs
+        # Use cached step data — steps are append-only, but the *latest* step's
+        # dir keeps growing as each cfg-scale clip lands. Invalidate the cache
+        # entry when its step_dir mtime advances so partial scans don't stick.
         with DashboardHandler._demo_cache_lock:
             run_cache = DashboardHandler._demo_cache.get(run_id)
             if run_cache is None:
-                run_cache = {"steps": {}}
+                run_cache = {"steps": {}, "step_mtimes": {}}
                 DashboardHandler._demo_cache[run_id] = run_cache
             cached_steps = run_cache["steps"]
+            cached_mtimes = run_cache.setdefault("step_mtimes", {})
 
         # List step dirs (single readdir, very cheap)
         try:
@@ -7200,7 +7211,12 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 continue
             step = int(m.group(1))  # raw-PT loop saves with the authoritative global_step
 
-            if step in cached_steps:
+            try:
+                cur_mtime = step_dir.stat().st_mtime
+            except OSError:
+                cur_mtime = None
+
+            if step in cached_steps and cached_mtimes.get(step) == cur_mtime:
                 result["steps"].append(cached_steps[step])
                 continue
 
@@ -7256,6 +7272,8 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             if clips:
                 with DashboardHandler._demo_cache_lock:
                     cached_steps[step] = step_entry
+                    if cur_mtime is not None:
+                        cached_mtimes[step] = cur_mtime
 
             result["steps"].append(step_entry)
         return result

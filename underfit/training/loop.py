@@ -491,8 +491,38 @@ def run_training(args, backend):
         os.makedirs(checkpoint_dir, exist_ok=True)
     run_label = re.sub(r"-\d{14}$", "", args.name) if args.name else None
 
-    # --- Loss-by-timestep log ---
-    lbt_log = _LossByTimestepLog(os.path.join(os.getcwd(), "loss_by_timestep.bin"))
+    # --- Persistent metrics dir (sibling of checkpoints/, inside the run's
+    # session dir so it falls under runs/**  and gets picked up by the HF
+    # sync glob automatically) ---
+    # checkpoint_dir = {save_dir}/{run_name}/{session_hash}/checkpoints
+    # metrics_dir   = {save_dir}/{run_name}/{session_hash}/metrics
+    if checkpoint_dir:
+        metrics_dir = os.path.join(os.path.dirname(checkpoint_dir), "metrics")
+        os.makedirs(metrics_dir, exist_ok=True)
+    else:
+        metrics_dir = None
+
+    # --- Loss-by-timestep log (moved from cwd into the persistent metrics
+    # dir so it survives session loss and the dashboard charts repopulate
+    # correctly on resume; falls back to cwd if no checkpoint_dir set) ---
+    lbt_path = (os.path.join(metrics_dir, "loss_by_timestep.bin")
+                if metrics_dir else os.path.join(os.getcwd(), "loss_by_timestep.bin"))
+    lbt_log = _LossByTimestepLog(lbt_path)
+
+    # --- TensorBoard (optional — graceful no-op if tensorboard not installed)
+    # Writes tfevents files into metrics_dir, which is under runs/** so the
+    # HF sync picks them up automatically. HF Hub renders a TensorBoard tab
+    # on the model page once tfevents files are present.
+    # Logs: loss, grad_norm, lora_magnitude, lr, best_ema_loss (when tracking).
+    tb_writer = None
+    if metrics_dir:
+        try:
+            from torch.utils.tensorboard import SummaryWriter
+            tb_writer = SummaryWriter(log_dir=metrics_dir, purge_step=step_offset or 0)
+            print(f"[startup] TensorBoard logging -> {metrics_dir}", flush=True)
+        except ImportError:
+            print("[startup] tensorboard not installed — skipping TB logging "
+                  "(pip install tensorboard to enable)", flush=True)
 
     # --- SIGUSR1 manual save ---
     manual_save_requested = [False]
@@ -744,6 +774,17 @@ def run_training(args, backend):
                 if best_tracker is not None:
                     best_tracker.update(loss.item())
 
+                # --- TensorBoard ---
+                if tb_writer is not None:
+                    tb_writer.add_scalar("train/loss", loss.item(), global_step)
+                    tb_writer.add_scalar("train/lr", lr, global_step)
+                    if grad_norm is not None:
+                        tb_writer.add_scalar("train/grad_norm", grad_norm, global_step)
+                    if lora_mag is not None:
+                        tb_writer.add_scalar("train/lora_magnitude", lora_mag, global_step)
+                    if best_tracker is not None and best_tracker.ema_loss is not None:
+                        tb_writer.add_scalar("train/ema_loss", best_tracker.ema_loss, global_step)
+
                 raw_step += 1
                 global_step = raw_step + step_offset
                 # Update progress bar prefix with the just-completed global step.
@@ -841,4 +882,6 @@ def run_training(args, backend):
                           f"{os.path.basename(best_path)}", flush=True)
     finally:
         lbt_log.close()
+        if tb_writer is not None:
+            tb_writer.close()
         print("Training done", flush=True)

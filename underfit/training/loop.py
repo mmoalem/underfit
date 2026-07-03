@@ -491,35 +491,33 @@ def run_training(args, backend):
         os.makedirs(checkpoint_dir, exist_ok=True)
     run_label = re.sub(r"-\d{14}$", "", args.name) if args.name else None
 
-    # --- Persistent metrics dir (sibling of checkpoints/, inside the run's
-    # session dir so it falls under runs/**  and gets picked up by the HF
-    # sync glob automatically) ---
-    # checkpoint_dir = {save_dir}/{run_name}/{session_hash}/checkpoints
-    # metrics_dir   = {save_dir}/{run_name}/{session_hash}/metrics
-    if checkpoint_dir:
-        metrics_dir = os.path.join(os.path.dirname(checkpoint_dir), "metrics")
-        os.makedirs(metrics_dir, exist_ok=True)
-    else:
-        metrics_dir = None
+    # --- demos dir: where the dashboard reads loss_by_timestep.bin from.
+    # server.py hardcodes: RUNS_DIR / run_id / "demos" / "loss_by_timestep.bin"
+    # We must write there, not in a custom metrics/ dir, or the dashboard
+    # Loss chart stays blank. Also added to HF sync WATCH list in the notebook
+    # so it persists across sessions.
+    demos_dir = None
+    if args.save_dir and args.name:
+        demos_dir = os.path.join(args.save_dir, args.name, "demos")
+        os.makedirs(demos_dir, exist_ok=True)
 
-    # --- Loss-by-timestep log (moved from cwd into the persistent metrics
-    # dir so it survives session loss and the dashboard charts repopulate
-    # correctly on resume; falls back to cwd if no checkpoint_dir set) ---
-    lbt_path = (os.path.join(metrics_dir, "loss_by_timestep.bin")
-                if metrics_dir else os.path.join(os.getcwd(), "loss_by_timestep.bin"))
+    lbt_path = (os.path.join(demos_dir, "loss_by_timestep.bin")
+                if demos_dir else os.path.join(os.getcwd(), "loss_by_timestep.bin"))
     lbt_log = _LossByTimestepLog(lbt_path)
 
     # --- TensorBoard (optional — graceful no-op if tensorboard not installed)
-    # Writes tfevents files into metrics_dir, which is under runs/** so the
-    # HF sync picks them up automatically. HF Hub renders a TensorBoard tab
-    # on the model page once tfevents files are present.
-    # Logs: loss, grad_norm, lora_magnitude, lr, best_ema_loss (when tracking).
+    # Writes tfevents files into a tb/ dir alongside the checkpoints, which
+    # falls under runs/** so the HF sync picks them up automatically.
+    # HF Hub renders a TensorBoard tab on the model page once tfevents files
+    # are present. Logs: loss, grad_norm, lora_magnitude, lr, ema_loss.
     tb_writer = None
-    if metrics_dir:
+    if checkpoint_dir:
+        tb_dir = os.path.join(os.path.dirname(checkpoint_dir), "tb")
+        os.makedirs(tb_dir, exist_ok=True)
         try:
             from torch.utils.tensorboard import SummaryWriter
-            tb_writer = SummaryWriter(log_dir=metrics_dir, purge_step=step_offset or 0)
-            print(f"[startup] TensorBoard logging -> {metrics_dir}", flush=True)
+            tb_writer = SummaryWriter(log_dir=tb_dir, purge_step=step_offset or 0)
+            print(f"[startup] TensorBoard logging -> {tb_dir}", flush=True)
         except ImportError:
             print("[startup] tensorboard not installed — skipping TB logging "
                   "(pip install tensorboard to enable)", flush=True)

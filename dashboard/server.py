@@ -165,6 +165,10 @@ def _apply_advanced_training_overrides(cfg, body):
     if best_ckpt_keep_n not in (None, ""):
         training_cfg["best_checkpoint_keep_n"] = int(best_ckpt_keep_n)
 
+    best_ckpt_check_every_n = body.get("best_checkpoint_check_every_n_epochs")
+    if best_ckpt_check_every_n not in (None, ""):
+        training_cfg["best_checkpoint_check_every_n_epochs"] = int(best_ckpt_check_every_n)
+
     timestep_sampler = body.get("timestep_sampler")
     if timestep_sampler:
         if timestep_sampler not in _VALID_TIMESTEP_SAMPLERS:

@@ -196,10 +196,12 @@ class _BestCheckpointTracker:
       - underfit has no validation loss, so this is a train-loss proxy —
         it can reflect overfitting, not genuine held-out generalization.
     """
-    def __init__(self, *, alpha=0.05, warmup_steps=0, keep_n=5, best_so_far=None):
+    def __init__(self, *, alpha=0.05, warmup_steps=0, keep_n=5, best_so_far=None,
+                 check_every_n_epochs=1):
         self.alpha = alpha
         self.warmup_steps = warmup_steps
         self.keep_n = keep_n
+        self.check_every_n_epochs = max(1, int(check_every_n_epochs))
         self.ema_loss = None
         self.best_so_far = best_so_far
         self._saved_paths = []  # oldest-first, for rotation
@@ -585,14 +587,17 @@ def run_training(args, backend):
 
     best_ckpt_warmup_steps = int(training_config.get("best_checkpoint_warmup_steps", 0) or 0)
     best_ckpt_keep_n = int(training_config.get("best_checkpoint_keep_n", 5) or 5)
+    best_ckpt_check_every_n = int(training_config.get("best_checkpoint_check_every_n_epochs", 10) or 10)
     best_tracker = _BestCheckpointTracker(
         warmup_steps=best_ckpt_warmup_steps,
         keep_n=best_ckpt_keep_n,
+        check_every_n_epochs=best_ckpt_check_every_n,
         best_so_far=best_so_far,
     ) if best_ckpt_warmup_steps >= 0 and training_config.get("best_checkpoint_enabled", False) else None
     if best_tracker is not None:
         print(f"[startup] Best-checkpoint tracking enabled (warmup={best_ckpt_warmup_steps} steps, "
-              f"keep_n={best_ckpt_keep_n}, resumed best={best_so_far})", flush=True)
+              f"keep_n={best_ckpt_keep_n}, check_every={best_ckpt_check_every_n} epochs, "
+              f"resumed best={best_so_far})", flush=True)
     raw_step = 0
     epoch = epoch_offset
 
@@ -842,7 +847,8 @@ def run_training(args, backend):
                     break
 
             # --- End of epoch: check for new best checkpoint ---
-            if best_tracker is not None and checkpoint_dir:
+            if (best_tracker is not None and checkpoint_dir
+                    and epoch % best_tracker.check_every_n_epochs == 0):
                 best_path = best_tracker.maybe_save_best(
                     backend=backend, model=model,
                     saved_lora_cfg=saved_lora_cfg, base_model_name=base_model_name,
